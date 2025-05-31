@@ -1,12 +1,14 @@
 import 'dart:math'; // For Random if generating gameId, though not strictly needed for this impl
 
+import 'package:flutter/cupertino.dart';
+
 import 'player.dart';
 import 'pawn.dart';
 import 'dice.dart';
 
 class Game {
   String gameId;
-  List<Player> players;
+  List<Player> players = [];
   int currentPlayerIndex;
   Dice dice;
 
@@ -94,7 +96,7 @@ class Game {
   // Method to move a pawn based on dice steps
   bool movePawn(Pawn pawn, int steps) {
     if (pawn.color != getCurrentPlayer().color) {
-      print("Attempted to move pawn of another player.");
+      debugPrint("Attempted to move pawn of another player.");
       return false; // Cannot move other player's pawn
     }
 
@@ -102,16 +104,16 @@ class Game {
       if (steps == 6) {
         int? startPos = startPositions[pawn.color];
         if (startPos == null) {
-          print("Error: Start position not defined for color ${pawn.color}");
+          debugPrint("Error: Start position not defined for color ${pawn.color}");
           return false;
         }
         pawn.position = startPos;
         pawn.state = PawnState.onBoard;
         // Potentially check if startPos is occupied by another pawn (capture logic here or later)
-        print("Pawn ${pawn.id} of ${pawn.color} moved out of home to $startPos");
+        debugPrint("Pawn ${pawn.id} of ${pawn.color} moved out of home to $startPos");
         return true;
       } else {
-        print("Pawn ${pawn.id} of ${pawn.color} needs a 6 to move out of home.");
+        debugPrint("Pawn ${pawn.id} of ${pawn.color} needs a 6 to move out of home.");
         return false; // Needs a 6 to move out of home
       }
     } else if (pawn.state == PawnState.onBoard) {
@@ -135,11 +137,11 @@ class Game {
       // The current (newPosition % 52) doesn't reflect this accurately.
       // This is a known simplification for this step.
 
-      print("Pawn ${pawn.id} of ${pawn.color} moved from ${pawn.position-steps} to ${pawn.position}");
+      debugPrint("Pawn ${pawn.id} of ${pawn.color} moved from ${pawn.position-steps} to ${pawn.position}");
       // Potentially check for captures at newPosition
       return true;
     } else if (pawn.state == PawnState.finished) {
-      print("Pawn ${pawn.id} of ${pawn.color} is already finished.");
+      debugPrint("Pawn ${pawn.id} of ${pawn.color} is already finished.");
       return false; // Cannot move a finished pawn
     }
     return false;
