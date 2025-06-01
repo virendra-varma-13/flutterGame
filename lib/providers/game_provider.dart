@@ -6,13 +6,21 @@ import 'package:ludo/models/player.dart'; // For type hinting if needed
 class GameState extends ChangeNotifier {
   late Game _game;
   Pawn? _selectedPawn;
+  int _numPlayers = 2; // Default, will be overridden by resetGame
+  bool _playWithAI = false; // Default
 
-  // Initialize the game with default players, can be customized
-  GameState({List<String>? playerColors}) {
-    _game = Game(playerColors: playerColors ?? ["Red", "Green", "Yellow", "Blue"]);
+  // Initialize the game with default settings or specified ones.
+  // The main initialization will now happen via resetGame from MyHomePage.
+  GameState() {
+    // Initialize with default values. These will be immediately overridden
+    // by the call to resetGame in MyHomePage's initState.
+    resetGame(numPlayers: 2, playWithAI: false);
   }
 
   // Getters to expose game data
+  // Expose numPlayers and playWithAI if UI needs them
+  int get numPlayersConfig => _numPlayers;
+  bool get playWithAIConfig => _playWithAI;
   Game get game => _game; // Expose the whole game object if needed by UI
   Player getCurrentPlayer() => _game.getCurrentPlayer();
   int get diceValue => _game.dice.currentValue;
@@ -23,15 +31,23 @@ class GameState extends ChangeNotifier {
   // Methods to modify game state
   void rollDice() {
     _game.rollDice();
-    // Potentially add logic here: e.g., if no moves possible, call nextTurn()
-    // For now, just roll and notify. UI will decide next steps.
     notifyListeners();
+
+    // Check for AI turn after dice roll
+    if (getCurrentPlayer().isAI) {
+      _handleAITurn();
+    }
   }
 
   void nextTurn() {
     _game.nextTurn();
     _selectedPawn = null; // Clear selected pawn on turn change
     notifyListeners();
+
+    // Check for AI turn after turn changes
+    if (getCurrentPlayer().isAI) {
+      _handleAITurn();
+    }
   }
 
   void selectPawn(Pawn pawn) {
@@ -94,9 +110,70 @@ class GameState extends ChangeNotifier {
   }
 
   // Method to re-initialize the game or start a new one
-  void resetGame({List<String>? playerColors}) {
-    _game = Game(playerColors: playerColors ?? ["Red", "Green", "Yellow", "Blue"]);
+  void resetGame({required int numPlayers, required bool playWithAI}) {
+    _numPlayers = numPlayers;
+    _playWithAI = playWithAI;
+    _game = Game(numPlayersToCreate: _numPlayers, playWithAI: _playWithAI);
     _selectedPawn = null;
+    print("Game reset in GameState: Players: $_numPlayers, AI: $_playWithAI. Actual players in game: ${_game.players.length}");
+    if (_playWithAI && _game.players.isNotEmpty && _game.players.last.isAI) {
+      print("AI Player confirmed: ${_game.players.last.color}");
+    }
     notifyListeners();
+    // Check if the first player is AI and trigger their turn
+    if (getCurrentPlayer().isAI) {
+        _handleAITurn();
+    }
+  }
+
+  // --- AI Logic ---
+  Future<void> _handleAITurn() async {
+    print("AI Turn: ${getCurrentPlayer().color}");
+    if (!getCurrentPlayer().isAI) return; // Should not happen if called correctly
+
+    // 1. Add a short delay for UX
+    await Future.delayed(const Duration(seconds: 1));
+
+    // AI doesn't "roll" in the same way a human does via UI button.
+    // The rollDice() method in GameState is for human players.
+    // For AI, we can directly roll the game's dice object.
+    // However, the current rollDice() in GameState also triggers AI check.
+    // To avoid re-entrancy issues or complex conditions in rollDice(),
+    // AI can have a slightly different flow for its first action (rolling).
+    // OR, ensure rollDice() is safe for AI to call.
+    // Current rollDice() calls notifyListeners() then _handleAITurn() if AI.
+    // If AI calls rollDice(), it will notify, then it will call _handleAITurn() again. This is a loop.
+
+    // Corrected AI dice roll:
+    _game.dice.roll(); // AI rolls the dice internally
+    print("AI rolled: ${diceValue}");
+    notifyListeners(); // Notify UI about dice roll
+
+    await Future.delayed(const Duration(milliseconds: 500)); // Short delay after showing dice roll
+
+    // 2. Find a movable pawn
+    Player aiPlayer = getCurrentPlayer();
+    List<Pawn> movablePawns = _game.getMovablePawns(aiPlayer, diceValue);
+
+    if (movablePawns.isNotEmpty) {
+      Pawn pawnToMove = movablePawns.first; // Simplest strategy: pick the first movable pawn
+      print("AI selected pawn: ${pawnToMove.id} at ${pawnToMove.position}");
+
+      // We need to set this as the selectedPawn for attemptMoveSelectedPawn to work
+      _selectedPawn = pawnToMove; // AI "selects" the pawn
+      // No need to notifyListeners for pawn selection if it's an internal AI step before immediate move.
+      // However, if we want UI to show AI's selection briefly, we could:
+      // notifyListeners();
+      // await Future.delayed(const Duration(milliseconds: 500));
+
+      attemptMoveSelectedPawn(); // This method handles notifyListeners and nextTurn logic
+    } else {
+      print("AI has no movable pawns with dice value $diceValue.");
+      // If no pawn is movable, the AI's turn ends.
+      // attemptMoveSelectedPawn already calls nextTurn if move fails or not a 6.
+      // But if no pawns are movable AT ALL, attemptMoveSelectedPawn is not called.
+      // So, we need to call nextTurn here.
+      nextTurn(); // This will also trigger _handleAITurn if the next player is AI.
+    }
   }
 }

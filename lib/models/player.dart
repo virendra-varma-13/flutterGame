@@ -4,12 +4,14 @@ class Player {
   final String id; // Could be a UUID or a simple identifier like "Player1"
   final String color; // e.g., "Red", "Green", "Blue", "Yellow"
   List<Pawn> pawns;
+  final bool isAI;
 
   Player({
     required this.id,
     required this.color,
     List<Pawn>? pawns,
-  }) : pawns = pawns ?? List.generate(4, (i) => Pawn(id: i, color: color)); // Each player gets 4 pawns by default
+    this.isAI = false, // Default to false, can be overridden
+  }) : pawns = pawns ?? List.generate(4, (i) => Pawn(id: i, color: color));
 
   // Helper method to get pawns at home
   List<Pawn> getHomePawns() {
@@ -33,6 +35,6 @@ class Player {
 
   @override
   String toString() {
-    return 'Player(id: $id, color: $color, pawns: ${pawns.length})';
+    return 'Player(id: $id, color: $color, isAI: $isAI, pawns: ${pawns.length})';
   }
 }

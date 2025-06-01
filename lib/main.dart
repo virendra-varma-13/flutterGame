@@ -32,14 +32,23 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blueGrey),
         useMaterial3: true,
       ),
-      home: const MyHomePage(title: 'Ludo Game Board'),
+      home: const SetupScreen(), // Changed home to SetupScreen
     );
   }
 }
 
 class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-  final String title;
+  // Added parameters to receive setup data
+  final int numPlayers;
+  final bool playWithAI;
+  final String title; // Kept title for now, can be removed if not used
+
+  const MyHomePage({
+    super.key,
+    required this.title,
+    required this.numPlayers,
+    required this.playWithAI,
+  });
 
   @override
   State<MyHomePage> createState() => _MyHomePageState();
@@ -48,6 +57,31 @@ class MyHomePage extends StatefulWidget {
 class _MyHomePageState extends State<MyHomePage> {
   // Local game state (_game, _diceValue, initState, _rollDiceAndUpdate) is removed.
   // GameState provider will manage this.
+
+  @override
+  void initState() {
+    super.initState();
+    // Print received parameters for verification
+    print("MyHomePage initState: Number of Players: ${widget.numPlayers}, Play with AI: ${widget.playWithAI}");
+
+    // Note: Game initialization based on these parameters will be done
+    // by interacting with the GameState provider.
+    // Call resetGame here to initialize the game based on setup parameters.
+    // Use WidgetsBinding.instance.addPostFrameCallback to ensure Provider is available.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Provider.of<GameState>(context, listen: false).resetGame(
+        numPlayers: widget.numPlayers,
+        playWithAI: widget.playWithAI
+      );
+    });
+  }
+
+  // Example helper to generate player colors based on numPlayers
+  // List<String> _generatePlayerColors(int numPlayers) {
+  //   List<String> allColors = ["Red", "Green", "Yellow", "Blue"];
+  //   return allColors.sublist(0, numPlayers);
+  // }
+
 
   Color _mapPlayerColorToColor(String colorName) {
     switch (colorName.toLowerCase()) {
@@ -194,7 +228,14 @@ class _MyHomePageState extends State<MyHomePage> {
           IconButton(
             icon: Icon(Icons.refresh),
             onPressed: () {
-              Provider.of<GameState>(context, listen: false).resetGame();
+              // When resetting from UI, use the currently configured numPlayers and playWithAI from GameState
+              // or re-navigate to SetupScreen if you want to allow changing these.
+              // For now, let's assume it resets with the *initial* setup parameters.
+              // This might require storing initialNumPlayers and initialPlayWithAI in _MyHomePageState if they can't be derived.
+              // Or, GameState's resetGame could be changed to have a no-arg version that reuses its stored _numPlayers, _playWithAI.
+              // For simplicity, let's make the AppBar reset use the currently configured game settings.
+              final gameState = Provider.of<GameState>(context, listen: false);
+              gameState.resetGame(numPlayers: gameState.numPlayersConfig, playWithAI: gameState.playWithAIConfig);
             },
           )
         ],
