@@ -1,5 +1,7 @@
 import 'dart:ui'; // For Offset and Size
-import 'package:ludo/core/constants.dart'; // For PlayerColor
+import 'package:ludo/core/constants.dart';
+
+import '../models/pawn.dart'; // For PlayerColor
 
 class LudoBoardCoordinates {
   final Size boardSize;
@@ -37,23 +39,23 @@ class LudoBoardCoordinates {
     // Red Home Base (Top-Left Quadrant)
     // Cells are typically (1.5, 1.5), (1.5, 3.5), (3.5, 1.5), (3.5, 3.5) in a 6x6 base grid
     homeBaseSpots[PlayerColor.red] = [
-      Offset(1.5 * cellSize, 1.5 * cellSize), Offset(1.5 * cellSize, 3.5 * cellSize),
-      Offset(3.5 * cellSize, 1.5 * cellSize), Offset(3.5 * cellSize, 3.5 * cellSize),
+      Offset(2 * cellSize, 2 * cellSize), Offset(2 * cellSize, 4 * cellSize),
+      Offset(4 * cellSize, 2 * cellSize), Offset(4 * cellSize, 4 * cellSize),
     ];
     // Green Home Base (Top-Right Quadrant)
     homeBaseSpots[PlayerColor.green] = [
-      Offset(10.5 * cellSize, 1.5 * cellSize), Offset(10.5 * cellSize, 3.5 * cellSize),
-      Offset(12.5 * cellSize, 1.5 * cellSize), Offset(12.5 * cellSize, 3.5 * cellSize),
+      Offset(11 * cellSize, 2 * cellSize), Offset(11 * cellSize, 4 * cellSize),
+      Offset(13 * cellSize, 2 * cellSize), Offset(13 * cellSize, 4 * cellSize),
     ];
     // Yellow Home Base (Bottom-Right Quadrant)
     homeBaseSpots[PlayerColor.yellow] = [
-      Offset(10.5 * cellSize, 10.5 * cellSize), Offset(10.5 * cellSize, 12.5 * cellSize),
-      Offset(12.5 * cellSize, 10.5 * cellSize), Offset(12.5 * cellSize, 12.5 * cellSize),
+      Offset(11 * cellSize, 11 * cellSize), Offset(11 * cellSize, 13 * cellSize),
+      Offset(13 * cellSize, 11 * cellSize), Offset(13 * cellSize, 13 * cellSize),
     ];
     // Blue Home Base (Bottom-Left Quadrant)
     homeBaseSpots[PlayerColor.blue] = [
-      Offset(1.5 * cellSize, 10.5 * cellSize), Offset(1.5 * cellSize, 12.5 * cellSize),
-      Offset(3.5 * cellSize, 10.5 * cellSize), Offset(3.5 * cellSize, 12.5 * cellSize),
+      Offset(2 * cellSize, 11 * cellSize), Offset(2 * cellSize, 13 * cellSize),
+      Offset(4 * cellSize, 11 * cellSize), Offset(4 * cellSize, 13 * cellSize),
     ];
   }
 

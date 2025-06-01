@@ -6,15 +6,16 @@ class PawnWidget extends StatelessWidget {
   final double size;
 
   const PawnWidget({
-    Key? key,
+    super.key,
     required this.pawnColor,
     required this.pawnId,
     this.size = 24.0, // Default size for the pawn
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
     return Container(
+      alignment: Alignment.center,
       width: size,
       height: size,
       decoration: BoxDecoration(

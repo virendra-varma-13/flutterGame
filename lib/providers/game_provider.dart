@@ -58,26 +58,26 @@ class GameState extends ChangeNotifier {
       notifyListeners();
     } else {
       // Optionally, provide feedback that this pawn cannot be selected
-      print("Cannot select pawn: Not current player's pawn.");
+      debugPrint("Cannot select pawn: Not current player's pawn.");
     }
   }
 
   // Attempts to move the currently selected pawn using the current dice value.
   void attemptMoveSelectedPawn() {
     if (_selectedPawn == null) {
-      print("No pawn selected to move.");
+      debugPrint("No pawn selected to move.");
       // Optionally, provide user feedback via a message
       return;
     }
     if (_selectedPawn!.color != getCurrentPlayer().color) {
-      print("Selected pawn does not belong to the current player.");
+      debugPrint("Selected pawn does not belong to the current player.");
       // This case should ideally be prevented by selectPawn logic
       return;
     }
 
     int currentDiceValue = _game.dice.currentValue;
     if (currentDiceValue == 0) { // Assuming 0 means dice not rolled or invalid state
-        print("Dice has not been rolled or shows 0.");
+        debugPrint("Dice has not been rolled or shows 0.");
         return;
     }
 
@@ -90,7 +90,7 @@ class GameState extends ChangeNotifier {
       // Also, if a pawn moves out of home or captures (not yet implemented), player might get another turn.
       // For now, simplified: only a 6 grants another turn.
       if (currentDiceValue == 6) {
-        print("Rolled a 6, player gets another turn.");
+        debugPrint("Rolled a 6, player gets another turn.");
         // Player might want to roll again or move another pawn if applicable.
         // For now, we just don't switch turns.
       } else {
@@ -104,7 +104,7 @@ class GameState extends ChangeNotifier {
       // The turn might still pass if no other pawn can be moved with the current dice roll.
       // This part of logic (checking if any move is possible) is not yet implemented.
       // For now, if a move fails, the turn doesn't automatically switch, allowing player to select another pawn.
-      print("Move for ${_selectedPawn!.id} of ${_selectedPawn!.color} was not successful with dice $currentDiceValue.");
+      debugPrint("Move for ${_selectedPawn!.id} of ${_selectedPawn!.color} was not successful with dice $currentDiceValue.");
     }
     notifyListeners();
   }
@@ -115,9 +115,9 @@ class GameState extends ChangeNotifier {
     _playWithAI = playWithAI;
     _game = Game(numPlayersToCreate: _numPlayers, playWithAI: _playWithAI);
     _selectedPawn = null;
-    print("Game reset in GameState: Players: $_numPlayers, AI: $_playWithAI. Actual players in game: ${_game.players.length}");
+    debugPrint("Game reset in GameState: Players: $_numPlayers, AI: $_playWithAI. Actual players in game: ${_game.players.length}");
     if (_playWithAI && _game.players.isNotEmpty && _game.players.last.isAI) {
-      print("AI Player confirmed: ${_game.players.last.color}");
+      debugPrint("AI Player confirmed: ${_game.players.last.color}");
     }
     notifyListeners();
     // Check if the first player is AI and trigger their turn
@@ -128,7 +128,7 @@ class GameState extends ChangeNotifier {
 
   // --- AI Logic ---
   Future<void> _handleAITurn() async {
-    print("AI Turn: ${getCurrentPlayer().color}");
+    debugPrint("AI Turn: ${getCurrentPlayer().color}");
     if (!getCurrentPlayer().isAI) return; // Should not happen if called correctly
 
     // 1. Add a short delay for UX
@@ -146,7 +146,7 @@ class GameState extends ChangeNotifier {
 
     // Corrected AI dice roll:
     _game.dice.roll(); // AI rolls the dice internally
-    print("AI rolled: ${diceValue}");
+    debugPrint("AI rolled: ${diceValue}");
     notifyListeners(); // Notify UI about dice roll
 
     await Future.delayed(const Duration(milliseconds: 500)); // Short delay after showing dice roll
@@ -157,7 +157,7 @@ class GameState extends ChangeNotifier {
 
     if (movablePawns.isNotEmpty) {
       Pawn pawnToMove = movablePawns.first; // Simplest strategy: pick the first movable pawn
-      print("AI selected pawn: ${pawnToMove.id} at ${pawnToMove.position}");
+      debugPrint("AI selected pawn: ${pawnToMove.id} at ${pawnToMove.position}");
 
       // We need to set this as the selectedPawn for attemptMoveSelectedPawn to work
       _selectedPawn = pawnToMove; // AI "selects" the pawn
@@ -168,7 +168,7 @@ class GameState extends ChangeNotifier {
 
       attemptMoveSelectedPawn(); // This method handles notifyListeners and nextTurn logic
     } else {
-      print("AI has no movable pawns with dice value $diceValue.");
+      debugPrint("AI has no movable pawns with dice value $diceValue.");
       // If no pawn is movable, the AI's turn ends.
       // attemptMoveSelectedPawn already calls nextTurn if move fails or not a 6.
       // But if no pawns are movable AT ALL, attemptMoveSelectedPawn is not called.

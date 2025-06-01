@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:ludo/main.dart'; // Import MyHomePage
 
 class SetupScreen extends StatefulWidget {
-  const SetupScreen({Key? key}) : super(key: key);
+  const SetupScreen({super.key});
 
   @override
   _SetupScreenState createState() => _SetupScreenState();
@@ -109,8 +109,8 @@ class _SetupScreenState extends State<SetupScreen> {
                 ),
                 onPressed: () {
                   // Logic to start the game with selected settings
-                  print('Selected Number of Players: $_selectedNumberOfPlayers');
-                  print('Play with AI: $_playWithAI');
+                  debugPrint('Selected Number of Players: $_selectedNumberOfPlayers');
+                  debugPrint('Play with AI: $_playWithAI');
 
                   // Navigate to MyHomePage and pass the settings
                   Navigator.pushReplacement(

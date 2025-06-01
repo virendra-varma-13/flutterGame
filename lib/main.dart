@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:ludo/screens/setup_screen.dart';
 import 'package:provider/provider.dart'; // Import Provider
 
 // Model imports (GameState will handle Game model directly)
@@ -11,6 +12,13 @@ import 'package:ludo/providers/game_provider.dart';
 // Widget imports
 import 'package:ludo/widgets/ludo_board_widget.dart';
 import 'package:ludo/widgets/pawn_widget.dart';
+
+// Core imports for LudoBoardCoordinates and PlayerColor enum
+import 'package:ludo/core/constants.dart' as ludo_constants;
+import 'package:ludo/core/ludo_board_coordinates.dart';
+import 'dart:ui' as ui;
+
+import 'models/game.dart';
 
 void main() {
   runApp(
@@ -55,75 +63,23 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  // Local game state (_game, _diceValue, initState, _rollDiceAndUpdate) is removed.
-  // GameState provider will manage this.
 
-  @override
-  void initState() {
-    super.initState();
-    // Print received parameters for verification
-    print("MyHomePage initState: Number of Players: ${widget.numPlayers}, Play with AI: ${widget.playWithAI}");
-
-    // Note: Game initialization based on these parameters will be done
-    // by interacting with the GameState provider.
-    // Call resetGame here to initialize the game based on setup parameters.
-    // Use WidgetsBinding.instance.addPostFrameCallback to ensure Provider is available.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      Provider.of<GameState>(context, listen: false).resetGame(
-        numPlayers: widget.numPlayers,
-        playWithAI: widget.playWithAI
-      );
-    });
-  }
-
-  // Example helper to generate player colors based on numPlayers
-  // List<String> _generatePlayerColors(int numPlayers) {
-  //   List<String> allColors = ["Red", "Green", "Yellow", "Blue"];
-  //   return allColors.sublist(0, numPlayers);
-  // }
-
-
-  Color _mapPlayerColorToColor(String colorName) {
-    switch (colorName.toLowerCase()) {
-      case "red":
-        return Colors.red.shade700;
-      case "green":
-        return Colors.green.shade700;
-      case "yellow":
-        return Colors.yellow.shade700;
-      case "blue":
-        return Colors.blue.shade700;
-      default:
-        return Colors.grey; // Default color
-    }
-  }
-
-// Core imports for LudoBoardCoordinates and PlayerColor enum
-import 'package:ludo/core/constants.dart' as ludo_constants;
-import 'package:ludo/core/ludo_board_coordinates.dart';
-import 'dart:ui' as ui; // For ui.Size
-
-// ... (other imports remain the same)
-
-// ... (MyApp and MyHomePage StatefulWidget definition remain the same)
-
-class _MyHomePageState extends State<MyHomePage> {
   late LudoBoardCoordinates _boardCoordinates;
   // Store the board drawing size. This should ideally match what's passed to LudoBoardWidget.
   // For now, fixed. Could be dynamic based on MediaQuery.
   final Size _boardDrawingActualSize = Size(360, 360);
 
-
   @override
   void initState() {
     super.initState();
+
     _boardCoordinates = LudoBoardCoordinates(boardSize: ui.Size(_boardDrawingActualSize.width, _boardDrawingActualSize.height));
 
-    print("MyHomePage initState: Number of Players: ${widget.numPlayers}, Play with AI: ${widget.playWithAI}");
+    debugPrint("MyHomePage initState: Number of Players: ${widget.numPlayers}, Play with AI: ${widget.playWithAI}");
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Provider.of<GameState>(context, listen: false).resetGame(
-        numPlayers: widget.numPlayers,
-        playWithAI: widget.playWithAI
+          numPlayers: widget.numPlayers,
+          playWithAI: widget.playWithAI
       );
     });
   }
@@ -164,10 +120,11 @@ class _MyHomePageState extends State<MyHomePage> {
 
         if (gameState.selectedPawn != null && gameState.selectedPawn!.id == pawn.id && gameState.selectedPawn!.color == pawn.color) {
            interactivePawn = Container(
+             alignment: Alignment.center,
              decoration: BoxDecoration(
                shape: BoxShape.circle,
-               border: Border.all(color: Colors.yellowAccent, width: 3), // Brighter selection
-               boxShadow: [BoxShadow(color: materialPlayerColor.withOpacity(0.9), blurRadius: 8, spreadRadius: 3)],
+               border: Border.all(color: Colors.yellowAccent, width: 1), // Brighter selection
+               boxShadow: [BoxShadow(color: materialPlayerColor.withOpacity(1), blurRadius: 6, spreadRadius: 2)],
              ),
              child: pawnWidget,
            );
@@ -176,7 +133,11 @@ class _MyHomePageState extends State<MyHomePage> {
         Offset position;
         if (pawn.state == PawnState.home) {
           // Use LudoBoardCoordinates for home spots. i is pawn's index (0-3)
-          position = _boardCoordinates.homeBaseSpots[playerEnumColor]![i];
+          if(widget.numPlayers == 1){
+            position = Offset(_boardCoordinates.homeBaseSpots[playerEnumColor]![i].dx + 12, _boardCoordinates.homeBaseSpots[playerEnumColor]![i].dy + 12);
+          }else{
+            position = _boardCoordinates.homeBaseSpots[playerEnumColor]![i];
+          }
         } else if (pawn.state == PawnState.onBoard) {
           // Use LudoBoardCoordinates for main track spots
           // The pawn.position from game model (0-51) is the index for mainTrackSpots
@@ -184,7 +145,7 @@ class _MyHomePageState extends State<MyHomePage> {
             position = _boardCoordinates.mainTrackSpots[pawn.position];
           } else {
             // This case should ideally not happen if pawn.position is always valid for onBoard state
-            print("Error: Pawn ${pawn.id} has invalid onBoard position: ${pawn.position}");
+            debugPrint("Error: Pawn ${pawn.id} has invalid onBoard position: ${pawn.position}");
             position = Offset(-1000, -1000); // Hide if invalid
           }
         } else { // PawnState.finished
@@ -193,7 +154,7 @@ class _MyHomePageState extends State<MyHomePage> {
           // This needs mapping pawn.position (if it indicates progress in home column) to homeColumnSpots.
           // If pawn.position for finished pawns is, e.g. 99, we need another way.
           // Assume pawn.position for finished state means progress into home column (e.g., 52-57 for Red)
-          int homeColumnProgress = pawn.position - (Game.maxBoardPosition + 1); // e.g. 52 becomes 0, 57 becomes 5
+          int homeColumnProgress = (pawn.position - (Game.maxBoardPosition + 1)); // e.g. 52 becomes 0, 57 becomes 5
           if (homeColumnProgress >=0 && homeColumnProgress < _boardCoordinates.homeColumnSpots[playerEnumColor]!.length) {
              position = _boardCoordinates.homeColumnSpots[playerEnumColor]![homeColumnProgress];
           } else {
@@ -212,7 +173,6 @@ class _MyHomePageState extends State<MyHomePage> {
           );
         }
       }
-    }
     return pawnWidgets;
   }
 
