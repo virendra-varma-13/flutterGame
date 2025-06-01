@@ -20,7 +20,15 @@ class PawnWidget extends StatelessWidget {
       decoration: BoxDecoration(
         color: pawnColor,
         shape: BoxShape.circle,
-        border: Border.all(color: Colors.black54, width: 1.5),
+        border: Border.all(color: Colors.black87, width: 1.5), // Changed to a more solid black
+        boxShadow: [ // Adding a subtle shadow for a bit of depth
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            spreadRadius: 0.5,
+            blurRadius: 1.5,
+            offset: const Offset(0, 1),
+          ),
+        ]
       ),
       child: Center(
         child: Text(

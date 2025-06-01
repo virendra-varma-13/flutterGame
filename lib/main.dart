@@ -98,110 +98,115 @@ class _MyHomePageState extends State<MyHomePage> {
     }
   }
 
+// Core imports for LudoBoardCoordinates and PlayerColor enum
+import 'package:ludo/core/constants.dart' as ludo_constants;
+import 'package:ludo/core/ludo_board_coordinates.dart';
+import 'dart:ui' as ui; // For ui.Size
+
+// ... (other imports remain the same)
+
+// ... (MyApp and MyHomePage StatefulWidget definition remain the same)
+
+class _MyHomePageState extends State<MyHomePage> {
+  late LudoBoardCoordinates _boardCoordinates;
+  // Store the board drawing size. This should ideally match what's passed to LudoBoardWidget.
+  // For now, fixed. Could be dynamic based on MediaQuery.
+  final Size _boardDrawingActualSize = Size(360, 360);
+
+
+  @override
+  void initState() {
+    super.initState();
+    _boardCoordinates = LudoBoardCoordinates(boardSize: ui.Size(_boardDrawingActualSize.width, _boardDrawingActualSize.height));
+
+    print("MyHomePage initState: Number of Players: ${widget.numPlayers}, Play with AI: ${widget.playWithAI}");
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Provider.of<GameState>(context, listen: false).resetGame(
+        numPlayers: widget.numPlayers,
+        playWithAI: widget.playWithAI
+      );
+    });
+  }
+
+  Color _mapPlayerColorStringToMaterialColor(String colorName) {
+    ludo_constants.PlayerColor? enumColor = ludo_constants.playerColorFromString(colorName);
+    if (enumColor != null) {
+      return ludo_constants.playerColorToMaterialColor[enumColor] ?? Colors.grey;
+    }
+    return Colors.grey;
+  }
+
   List<Widget> _buildPawnWidgets(BuildContext context) {
-    // Access GameState here. Listen: true is fine if this needs to rebuild on changes.
-    // However, specific pawn movements might be better handled by Consumer widgets around individual pawns if performance becomes an issue.
     final gameState = Provider.of<GameState>(context);
     List<Widget> pawnWidgets = [];
-    double boardSize = 300.0;
-    double pawnSize = 24.0;
+    // boardSize is now _boardDrawingActualSize.width (or height)
+    double pawnSize = _boardCoordinates.cellSize * 0.8; // Make pawn size relative to cell size
 
-    Map<String, List<Offset>> playerHomeOffsets = {
-      "Red": [Offset(pawnSize, pawnSize), Offset(pawnSize*2.5, pawnSize), Offset(pawnSize, pawnSize*2.5), Offset(pawnSize*2.5, pawnSize*2.5)],
-      "Green": [Offset(boardSize - pawnSize*3.5, pawnSize), Offset(boardSize - pawnSize*2, pawnSize), Offset(boardSize - pawnSize*3.5, pawnSize*2.5), Offset(boardSize - pawnSize*2, pawnSize*2.5)],
-      "Yellow": [Offset(boardSize - pawnSize*3.5, boardSize - pawnSize*3.5), Offset(boardSize - pawnSize*2, boardSize - pawnSize*3.5), Offset(boardSize - pawnSize*3.5, boardSize - pawnSize*2), Offset(boardSize - pawnSize*2, boardSize - pawnSize*2)],
-      "Blue": [Offset(pawnSize, boardSize - pawnSize*3.5), Offset(pawnSize*2.5, boardSize - pawnSize*3.5), Offset(pawnSize, boardSize - pawnSize*2), Offset(pawnSize*2.5, boardSize - pawnSize*2)],
-    };
-
-    for (var player in gameState.players) { // Use players from GameState
-      Color playerColor = _mapPlayerColorToColor(player.color);
-      List<Offset> homeOffsets = playerHomeOffsets[player.color] ?? [];
+    for (var player in gameState.players) {
+      Color materialPlayerColor = _mapPlayerColorStringToMaterialColor(player.color);
+      ludo_constants.PlayerColor playerEnumColor = ludo_constants.playerColorFromString(player.color) ?? ludo_constants.PlayerColor.red; // Fallback
 
       for (int i = 0; i < player.pawns.length; i++) {
         Pawn pawn = player.pawns[i];
         Widget pawnWidget = PawnWidget(
-          pawnColor: playerColor,
+          pawnColor: materialPlayerColor,
           pawnId: pawn.id,
           size: pawnSize,
         );
 
-        // Add a GestureDetector to each pawn for selection
         Widget interactivePawn = GestureDetector(
           onTap: () {
-            // Use listen: false for actions
+            if (player.isAI) return; // Prevent selecting AI pawns by click
             Provider.of<GameState>(context, listen: false).selectPawn(pawn);
           },
           child: pawnWidget,
         );
 
-        // Highlight selected pawn (optional visual feedback)
         if (gameState.selectedPawn != null && gameState.selectedPawn!.id == pawn.id && gameState.selectedPawn!.color == pawn.color) {
            interactivePawn = Container(
              decoration: BoxDecoration(
                shape: BoxShape.circle,
-               border: Border.all(color: Colors.white, width: 3),
-               boxShadow: [BoxShadow(color: playerColor.withOpacity(0.7), blurRadius: 10, spreadRadius: 2)],
+               border: Border.all(color: Colors.yellowAccent, width: 3), // Brighter selection
+               boxShadow: [BoxShadow(color: materialPlayerColor.withOpacity(0.9), blurRadius: 8, spreadRadius: 3)],
              ),
              child: pawnWidget,
            );
         }
 
-
-        if (pawn.state == PawnState.home && i < homeOffsets.length) {
-          pawnWidgets.add(
-            Positioned(
-              top: homeOffsets[i].dy,
-              left: homeOffsets[i].dx,
-              child: interactivePawn,
-            ),
-          );
+        Offset position;
+        if (pawn.state == PawnState.home) {
+          // Use LudoBoardCoordinates for home spots. i is pawn's index (0-3)
+          position = _boardCoordinates.homeBaseSpots[playerEnumColor]![i];
         } else if (pawn.state == PawnState.onBoard) {
-          // Crude linear mapping for on-board pawns for visual feedback of movement
-          // This is NOT a proper Ludo board path.
-          // It just distributes pawns along 4 sides of a square.
-          double x = 0, y = 0;
-          // Using boardSize for path calculation, pawnSize for individual pawn rendering
-          const double pathMargin = 30.0; // Margin from board edge to the path
-          double effectiveBoardSide = boardSize - 2 * pathMargin; // Play area for path
-          const int positionsPerSide = 13; // 52 total / 4 sides = 13
-          double stepSize = effectiveBoardSide / (positionsPerSide -1); // Distance between pawn centers on a side
-
-          int currentPosition = pawn.position; // 0-51
-
-          // Determine which side and position on that side
-          int side = currentPosition ~/ positionsPerSide; // 0: top, 1: right, 2: bottom, 3: left (for typical Ludo path starting Red)
-          int posOnSide = currentPosition % positionsPerSide;
-
-          // Player-specific offsets to make pawns of same player slightly offset if on same spot (rare with this crude mapping)
-          // And to make different player pawns also not perfectly overlap if on same calculated spot.
-          double pawnPlayerOffset = (gameState.players.indexOf(player) - 1.5) * pawnSize / 4;
-
-
-          if (side == 0) { // Top row (e.g., Red's path part 1)
-            x = pathMargin + posOnSide * stepSize;
-            y = pathMargin + pawnPlayerOffset;
-          } else if (side == 1) { // Right column (e.g., Green's path part 1)
-            x = pathMargin + effectiveBoardSide - pawnPlayerOffset;
-            y = pathMargin + posOnSide * stepSize;
-          } else if (side == 2) { // Bottom row (e.g., Yellow's path part 1)
-            x = pathMargin + effectiveBoardSide - posOnSide * stepSize;
-            y = pathMargin + effectiveBoardSide - pawnPlayerOffset;
-          } else { // Left column (e.g., Blue's path part 1, side == 3)
-            x = pathMargin + pawnPlayerOffset;
-            y = pathMargin + effectiveBoardSide - posOnSide * stepSize;
+          // Use LudoBoardCoordinates for main track spots
+          // The pawn.position from game model (0-51) is the index for mainTrackSpots
+          if (pawn.position >= 0 && pawn.position < _boardCoordinates.mainTrackSpots.length) {
+            position = _boardCoordinates.mainTrackSpots[pawn.position];
+          } else {
+            // This case should ideally not happen if pawn.position is always valid for onBoard state
+            print("Error: Pawn ${pawn.id} has invalid onBoard position: ${pawn.position}");
+            position = Offset(-1000, -1000); // Hide if invalid
           }
+        } else { // PawnState.finished
+          // Use LudoBoardCoordinates for home column spots or center
+          // For simplicity, let's place finished pawns near their home column's end or center.
+          // This needs mapping pawn.position (if it indicates progress in home column) to homeColumnSpots.
+          // If pawn.position for finished pawns is, e.g. 99, we need another way.
+          // Assume pawn.position for finished state means progress into home column (e.g., 52-57 for Red)
+          int homeColumnProgress = pawn.position - (Game.maxBoardPosition + 1); // e.g. 52 becomes 0, 57 becomes 5
+          if (homeColumnProgress >=0 && homeColumnProgress < _boardCoordinates.homeColumnSpots[playerEnumColor]!.length) {
+             position = _boardCoordinates.homeColumnSpots[playerEnumColor]![homeColumnProgress];
+          } else {
+             // If truly finished (at the absolute center)
+             position = _boardCoordinates.centerFinishSpot;
+          }
+        }
 
-          // Add small random jitter if multiple pawns land on the exact same calculated spot
-          // This is more for visual debugging than proper game logic for stacking.
-          // For real Ludo, you'd have specific rules for stacking or sending back.
-          // x += Random().nextDouble() * pawnSize/4 - pawnSize/8;
-          // y += Random().nextDouble() * pawnSize/4 - pawnSize/8;
-
-
-          pawnWidgets.add(
-            Positioned(
-              top: y.clamp(0, boardSize - pawnSize),
-              left: x.clamp(0, boardSize - pawnSize),
+        pawnWidgets.add(
+          Positioned(
+            // LudoBoardCoordinates provides center points, adjust for top-left if PawnWidget origin is top-left
+            top: position.dy - pawnSize / 2,
+            left: position.dx - pawnSize / 2,
               child: interactivePawn,
             ),
           );
@@ -213,9 +218,9 @@ class _MyHomePageState extends State<MyHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    double boardWidgetSize = 300.0;
-    // Access GameState. For data that changes, listen: true (default)
-    // For actions (like button presses), typically listen: false
+    // boardWidgetSize is now _boardDrawingActualSize
+    // final gameState object is already obtained in _buildPawnWidgets if needed there,
+    // or can be obtained here again if other parts of build need it.
     final gameState = Provider.of<GameState>(context);
     // For actions, you can also define it once:
     // final gameActions = Provider.of<GameState>(context, listen: false);
@@ -246,27 +251,40 @@ class _MyHomePageState extends State<MyHomePage> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: <Widget>[
               LudoBoardWidget(
-                boardSize: boardWidgetSize,
-                pawnsToDisplay: _buildPawnWidgets(context), // Pass context if needed by the method
+                boardDrawingSize: _boardDrawingActualSize, // Pass the defined size
+                pawnsToDisplay: _buildPawnWidgets(context),
               ),
               const SizedBox(height: 20),
-              Text(
-                'Dice: ${gameState.diceValue}', // Get diceValue from GameState
-                style: Theme.of(context).textTheme.headlineMedium,
+              Consumer<GameState>( // Use Consumer for parts of UI that depend on GameState
+                builder: (context, gameState, child) {
+                  return Text(
+                    'Dice: ${gameState.diceValue}',
+                    style: Theme.of(context).textTheme.headlineMedium,
+                  );
+                }
               ),
               const SizedBox(height: 10),
-              Text(
-                'Current Player: ${gameState.getCurrentPlayer().color}', // Get current player from GameState
-                style: Theme.of(context).textTheme.titleLarge,
+              Consumer<GameState>(
+                builder: (context, gameState, child) {
+                  if (gameState.players.isEmpty) return const Text("Loading players..."); // Handle empty players list
+                  return Text(
+                    'Current Player: ${gameState.getCurrentPlayer().color} ${gameState.getCurrentPlayer().isAI ? "(AI)" : ""}',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  );
+                }
               ),
-               if (gameState.selectedPawn != null) // Display selected pawn info
-                Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: Text(
-                    'Selected: ${gameState.selectedPawn!.color} Pawn ${gameState.selectedPawn!.id}',
-                    style: TextStyle(fontSize: 16, color: _mapPlayerColorToColor(gameState.selectedPawn!.color)),
-                  ),
-                ),
+               Consumer<GameState>( // Consumer for selected pawn info
+                 builder: (context, gameState, child) {
+                   if (gameState.selectedPawn == null) return const SizedBox.shrink();
+                   return Padding(
+                     padding: const EdgeInsets.all(8.0),
+                     child: Text(
+                       'Selected: ${gameState.selectedPawn!.color} Pawn ${gameState.selectedPawn!.id}',
+                       style: TextStyle(fontSize: 16, color: _mapPlayerColorStringToMaterialColor(gameState.selectedPawn!.color)),
+                     ),
+                   );
+                 }
+               ),
               const SizedBox(height: 20),
               ElevatedButton(
                 onPressed: () {
@@ -287,14 +305,17 @@ class _MyHomePageState extends State<MyHomePage> {
                   padding: const EdgeInsets.only(top: 10.0),
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: _mapPlayerColorToColor(gameState.selectedPawn!.color).withOpacity(0.8),
+                      backgroundColor: gameState.selectedPawn != null ? _mapPlayerColorStringToMaterialColor(gameState.selectedPawn!.color).withOpacity(0.8) : Colors.grey,
                     ),
-                    onPressed: () {
-                      // Call the provider method to attempt the move
-                      Provider.of<GameState>(context, listen: false).attemptMoveSelectedPawn();
-                    },
+                    onPressed: (gameState.selectedPawn != null && !gameState.getCurrentPlayer().isAI) // Disable for AI or if no pawn selected
+                      ? () {
+                          Provider.of<GameState>(context, listen: false).attemptMoveSelectedPawn();
+                        }
+                      : null, // Disable button
                     child: Text(
-                      'Move ${gameState.selectedPawn!.color} Pawn ${gameState.selectedPawn!.id} with ${gameState.diceValue}',
+                      gameState.selectedPawn != null
+                        ? 'Move ${gameState.selectedPawn!.color} Pawn ${gameState.selectedPawn!.id} with ${gameState.diceValue}'
+                        : 'Select a Pawn to Move',
                       style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                     ),
                   ),
