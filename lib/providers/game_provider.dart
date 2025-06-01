@@ -33,6 +33,21 @@ class GameState extends ChangeNotifier {
     _game.rollDice();
     notifyListeners();
 
+    // New logic for auto-passing human player's turn
+    Player currentPlayer = getCurrentPlayer();
+    int currentDiceValue = _game.dice.currentValue;
+    if (!currentPlayer.isAI &&
+        currentDiceValue != 6 &&
+        currentPlayer.getOnBoardPawns().isEmpty) {
+      debugPrint(
+          "Human player ${currentPlayer.color} rolled $currentDiceValue and has no pawns on board. Auto-passing turn.");
+      nextTurn(); // nextTurn already calls notifyListeners
+      // Return to prevent AI turn logic from executing if it's somehow triggered
+      // This is a safeguard, as nextTurn() should change the player.
+      // If the next player is AI, the nextTurn() -> _handleAITurn() will manage it.
+      return;
+    }
+
     // Check for AI turn after dice roll
     if (getCurrentPlayer().isAI) {
       _handleAITurn();

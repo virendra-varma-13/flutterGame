@@ -159,4 +159,105 @@ void main() {
     });
 
   });
+
+  group('GameState Auto Turn Pass Logic', () {
+    late GameState gameState;
+    late Player player1; // Typically Red, Human
+    late Player player2; // Typically Green, Human
+
+    // Helper to set up a standard 2-player human game
+    void setupStandardHumanGame() {
+      gameState = GameState(); // Calls resetGame with 2 players, no AI by default
+
+      // Ensure Player 1 (Red) is the current player
+      // The GameState.resetGame by default sets up players: Red, Green, Yellow, Blue
+      // For a 2-player game, it will be Red, Green.
+      // We need to ensure the game is set to the first player's turn.
+      // resetGame should handle setting the initial player, but let's be sure.
+      gameState.game.currentPlayerIndex = 0;
+
+      player1 = gameState.players[0];
+      player2 = gameState.players[1];
+
+      // Verify initial setup assumptions
+      expect(player1.color, "Red", reason: "Player 1 should be Red");
+      expect(player1.isAI, isFalse, reason: "Player 1 should be Human in this setup");
+      expect(player2.color, "Green", reason: "Player 2 should be Green");
+      expect(player2.isAI, isFalse, reason: "Player 2 should be Human in this setup");
+      expect(gameState.getCurrentPlayer(), player1, reason: "Current player should be Player 1 (Red) initially");
+
+      // Ensure all pawns for player1 are at home
+      for (var pawn in player1.pawns) {
+        expect(pawn.state, PawnState.home, reason: "All Player 1 pawns should be home at start.");
+      }
+    }
+
+    setUp(() {
+      setupStandardHumanGame();
+    });
+
+    test('Human player, no pawns out, rolls < 6: turn passes', () {
+      // Pre-conditions verified by setupStandardHumanGame and specific checks
+      expect(player1.isAI, isFalse, reason: "Test requires Player 1 to be human.");
+      expect(player1.getOnBoardPawns().isEmpty, isTrue, reason: "Player 1 must have no pawns on board.");
+
+      // Force dice roll to a value less than 6
+      gameState.game.dice.currentValue = 3;
+
+      Player initialPlayer = gameState.getCurrentPlayer();
+      expect(initialPlayer, player1, reason: "Player 1 should be the current player before rolling dice.");
+
+      gameState.rollDice(); // Action: Roll the dice
+
+      // Expectation: Current player should switch to Player 2
+      expect(gameState.getCurrentPlayer(), player2, reason: "Turn should automatically pass to Player 2.");
+    });
+
+    test('Human player, no pawns out, rolls 6: turn does NOT pass automatically', () {
+      expect(player1.isAI, isFalse);
+      expect(player1.getOnBoardPawns().isEmpty, isTrue);
+
+      gameState.game.dice.currentValue = 6; // Force dice roll = 6
+      Player initialPlayer = gameState.getCurrentPlayer();
+      expect(initialPlayer, player1);
+
+      gameState.rollDice(); // Action: Roll the dice
+
+      // Expectation: Current player should remain Player 1
+      expect(gameState.getCurrentPlayer(), player1, reason: "Turn should not pass automatically when a 6 is rolled.");
+    });
+
+    test('Human player, one pawn out, rolls < 6: turn does NOT pass automatically', () {
+      expect(player1.isAI, isFalse);
+
+      // Setup: Manually put one pawn on board for Player 1
+      // Ensure pawn is valid and belongs to player1
+      expect(player1.pawns.isNotEmpty, isTrue, reason: "Player 1 should have pawns.");
+      Pawn pawnToMove = player1.pawns[0];
+      pawnToMove.state = PawnState.onBoard;
+      pawnToMove.position = Game.startPositions[player1.color] ?? 0; // Place at start position
+      expect(player1.getOnBoardPawns().isNotEmpty, isTrue, reason: "Player 1 should have one pawn on board after setup.");
+      expect(player1.getOnBoardPawns().length, 1, reason: "Only one pawn should be on board.");
+
+
+      gameState.game.dice.currentValue = 3; // Force dice roll < 6
+      Player initialPlayer = gameState.getCurrentPlayer();
+      expect(initialPlayer, player1);
+
+      gameState.rollDice(); // Action: Roll the dice
+
+      // Expectation: Current player should remain Player 1
+      expect(gameState.getCurrentPlayer(), player1, reason: "Turn should not pass, player has a pawn on board and rolled < 6.");
+    });
+
+    // Optional Test Case 4: AI player, no pawns out, rolls < 6
+    // As reasoned before, the specific logic `!currentPlayer.isAI && ...` means this exact path isn't for AI.
+    // AI's turn passing would be handled by its own `_handleAITurn` logic after it rolls.
+    // A test for AI turn passing would look different:
+    // 1. Set up AI player's turn.
+    // 2. AI rolls (e.g., < 6).
+    // 3. AI has no movable pawns (e.g., all home, roll != 6).
+    // 4. Verify _handleAITurn calls nextTurn().
+    // This is out of scope for testing the *newly added* human-specific auto-pass logic.
+  });
 }
