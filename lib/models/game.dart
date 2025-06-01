@@ -131,10 +131,22 @@ class Game {
   // Maximum position on the main board track
   static const int maxBoardPosition = 51; // 0-51 are 52 squares
 
+  // Home stretch related constants
+  static const Map<String, int> homeEntryThresholds = {
+    "Red": 51,    // Red enters home stretch after board position 51
+    "Green": 12,  // Green enters home stretch after board position 12
+    "Yellow": 25, // Yellow enters home stretch after board position 25
+    "Blue": 38    // Blue enters home stretch after board position 38
+  };
+  static const int homeColumnSize = 6; // 0-4 are path squares, 5 is the final goal spot (index inside home stretch).
+                                       // So, index 5 (homeColumnSize - 1) means finished.
+  static const int finishedPositionValue = 99; // Arbitrary value for pawn.position when finished.
+
+
   // Method to move a pawn based on dice steps
   bool movePawn(Pawn pawn, int steps) {
     if (pawn.color != getCurrentPlayer().color) {
-      debugPrint("Attempted to move pawn of another player.");
+      debugPrint("Attempted to move pawn of another player: ${pawn.color} vs ${getCurrentPlayer().color}");
       return false; // Cannot move other player's pawn
     }
 
@@ -147,53 +159,81 @@ class Game {
         }
         pawn.position = startPos;
         pawn.state = PawnState.onBoard;
-        // Potentially check if startPos is occupied by another pawn (capture logic here or later)
         debugPrint("Pawn ${pawn.id} of ${pawn.color} moved out of home to $startPos");
         return true;
       } else {
         debugPrint("Pawn ${pawn.id} of ${pawn.color} needs a 6 to move out of home.");
-        return false; // Needs a 6 to move out of home
+        return false;
       }
     } else if (pawn.state == PawnState.onBoard) {
-      // Basic movement on the board, wraps around.
-      // Does not yet handle entering the home stretch or finishing.
-      int newPosition = (pawn.position + steps);
+        int currentPos = pawn.position;
+        PawnState newCalculatedState = pawn.state;
+        int newCalculatedPos = currentPos;
 
-      // TODO: Implement logic for home stretch and finishing
-      // For now, if a pawn overshoots its home entry, it might just keep circling.
-      // Or, for simplicity, let's say it cannot overshoot the max board position for now,
-      // unless we implement the full path including home columns.
-      // A true Ludo board path isn't a simple modulo 52 for all colors once they approach their home column.
-      // Each color has a specific path. For now, we'll use a simplified modulo 52.
+        int? entryThresh = homeEntryThresholds[pawn.color];
+        if (entryThresh == null) { // Should not happen if colors are Red, Green, Yellow, Blue
+            debugPrint("Error: Home entry threshold not defined for color ${pawn.color}");
+            return false;
+        }
 
-      pawn.position = newPosition % (maxBoardPosition + 1); // Simple circular path 0-51
+        for (int s = 1; s <= steps; s++) {
+            if (newCalculatedState == PawnState.onBoard) {
+                if (newCalculatedPos == entryThresh) {
+                    newCalculatedState = PawnState.inHomeStretch;
+                    newCalculatedPos = 0;
+                } else {
+                    newCalculatedPos = (newCalculatedPos + 1) % (maxBoardPosition + 1);
+                }
+            } else { // PawnState.inHomeStretch
+                newCalculatedPos++;
+            }
+        }
 
-      // If newPosition > maxBoardPosition, it means pawn is entering or in its home column.
-      // This part needs more detailed logic per player color.
-      // For example, if a Red pawn (starts at 0) is at position 50 and rolls 3,
-      // it should go 50 -> 51 -> RedHome1 -> RedHome2.
-      // The current (newPosition % 52) doesn't reflect this accurately.
-      // This is a known simplification for this step.
+        if (newCalculatedState == PawnState.inHomeStretch) {
+            if (newCalculatedPos >= homeColumnSize) {
+                debugPrint("Pawn ${pawn.id} of ${pawn.color} overshot home column path (target: $newCalculatedPos, size: $homeColumnSize). Invalid move.");
+                return false;
+            }
+            if (newCalculatedPos == homeColumnSize - 1) {
+                newCalculatedState = PawnState.finished;
+                newCalculatedPos = finishedPositionValue;
+            }
+        }
 
-      debugPrint("Pawn ${pawn.id} of ${pawn.color} moved from ${pawn.position-steps} to ${pawn.position}");
-      // Potentially check for captures at newPosition
-      return true;
+        pawn.position = newCalculatedPos;
+        pawn.state = newCalculatedState;
+        debugPrint("Pawn ${pawn.id} of ${pawn.color} moved to pos ${pawn.position} state ${pawn.state.name} (was onBoard/transitioned)");
+        return true;
+
+    } else if (pawn.state == PawnState.inHomeStretch) {
+        int newHomePos = pawn.position + steps;
+
+        if (newHomePos >= homeColumnSize) {
+            debugPrint("Pawn ${pawn.id} of ${pawn.color} overshot in home stretch (target: $newHomePos, size: $homeColumnSize). Invalid move.");
+            return false;
+        }
+        if (newHomePos == homeColumnSize - 1) {
+            pawn.state = PawnState.finished;
+            pawn.position = finishedPositionValue;
+            debugPrint("Pawn ${pawn.id} of ${pawn.color} finished!");
+        } else {
+            pawn.position = newHomePos;
+            debugPrint("Pawn ${pawn.id} of ${pawn.color} moved to home stretch pos ${pawn.position}");
+        }
+        return true;
+
     } else if (pawn.state == PawnState.finished) {
-      debugPrint("Pawn ${pawn.id} of ${pawn.color} is already finished.");
-      return false; // Cannot move a finished pawn
+        debugPrint("Pawn ${pawn.id} of ${pawn.color} is already finished.");
+        return false;
     }
+
+    debugPrint("Pawn ${pawn.id} of ${pawn.color} in unhandled state ${pawn.state} or other error in movePawn logic.");
     return false;
   }
 
   // Helper method to get a list of pawns a player can move with a given dice value
   List<Pawn> getMovablePawns(Player player, int diceValue) {
     List<Pawn> movable = [];
-    if (player.id != getCurrentPlayer().id) {
-      // Not this player's turn (should ideally be checked before calling)
-      // Or, if called for hypothetical checks, ensure it's for the player passed in.
-      // For AI, player will be getCurrentPlayer().
-       if(player.id != getCurrentPlayer().id) return [];
-    }
 
     for (Pawn pawn in player.pawns) {
       if (pawn.state == PawnState.home) {
@@ -201,12 +241,16 @@ class Game {
           movable.add(pawn);
         }
       } else if (pawn.state == PawnState.onBoard) {
-        // Any pawn on board is considered movable for now.
-        // More advanced logic would check if the move is blocked by own pawns,
-        // or if it leads to a finish, etc.
+        // Pawns on the main board are generally movable.
+        // The movePawn method will validate if the specific move is possible (e.g., not overshooting home entry).
         movable.add(pawn);
+      } else if (pawn.state == PawnState.inHomeStretch) {
+        // Pawns in the home stretch can move if they do not overshoot the finish.
+        if (pawn.position + diceValue < homeColumnSize) {
+          movable.add(pawn);
+        }
       }
-      // Finished pawns are not movable
+      // Pawns in PawnState.finished are not added.
     }
     return movable;
   }

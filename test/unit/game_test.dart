@@ -260,4 +260,157 @@ void main() {
     // 4. Verify _handleAITurn calls nextTurn().
     // This is out of scope for testing the *newly added* human-specific auto-pass logic.
   });
+
+  group('Pawn Movement and Home Stretch Logic', () {
+    late GameState gameState;
+    late Player p1HumanRed; // Player 1, Human, Red
+    late Player p2HumanGreen; // Player 2, Human, Green
+
+    // Helper to initialize a standard 2-player game (Red, Green), both human
+    // and set current turn to Red.
+    void setupTestGame() {
+      gameState = GameState(); // Initializes a 2-player game by default
+      gameState.resetGame(numPlayers: 2, playWithAI: false); // Ensure it's 2 humans
+
+      p1HumanRed = gameState.players[0];
+      p2HumanGreen = gameState.players[1];
+
+      // Verify colors and AI status
+      expect(p1HumanRed.color, "Red");
+      expect(p1HumanRed.isAI, isFalse);
+      expect(p2HumanGreen.color, "Green");
+      expect(p2HumanGreen.isAI, isFalse);
+
+      gameState.game.currentPlayerIndex = gameState.players.indexOf(p1HumanRed); // Set Red as current player
+      expect(gameState.getCurrentPlayer(), p1HumanRed);
+    }
+
+    Pawn setupPawn(Player player, int pawnId, PawnState state, int position) {
+      Pawn pawn = player.pawns.firstWhere((p) => p.id == pawnId);
+      pawn.state = state;
+      pawn.position = position;
+      return pawn;
+    }
+
+    setUp(() {
+      setupTestGame();
+    });
+
+    test('Human player moves pawn from home on a 6', () {
+      expect(p1HumanRed.pawns[0].state, PawnState.home); // Ensure pawn is home
+
+      gameState.game.dice.currentValue = 6; // Simulate dice roll outcome
+      gameState.rollDice(); // This sets _stickyDiceValue and notifies listeners
+
+      gameState.selectPawn(p1HumanRed.pawns[0]);
+      gameState.attemptMoveSelectedPawn();
+
+      expect(p1HumanRed.pawns[0].state, PawnState.onBoard, reason: "Pawn should be on board");
+      expect(p1HumanRed.pawns[0].position, Game.startPositions["Red"], reason: "Pawn should be at Red's start position");
+      expect(gameState.getCurrentPlayer(), p1HumanRed, reason: "Player should get another turn after rolling a 6");
+      expect(gameState.game.dice.currentValue, 6, reason: "Original dice value should be preserved for UI if needed");
+      // _stickyDiceValue should be null because the 6 was consumed for the move.
+      // Accessing it directly for test: gameState._stickyDiceValue (not possible from outside)
+      // We infer it by behavior: if player tries to move again without rolling, it shouldn't work or use old value.
+      // For this test, pawn moved and player has another turn.
+    });
+
+    test('Pawn correctly enters its home stretch (Red pawn)', () {
+      Pawn testPawn = setupPawn(p1HumanRed, 0, PawnState.onBoard, Game.homeEntryThresholds["Red"]!); // Pawn at Red's home entry threshold (51)
+
+      gameState.game.dice.currentValue = 1;
+      gameState.rollDice();
+
+      gameState.selectPawn(testPawn);
+      gameState.attemptMoveSelectedPawn();
+
+      expect(testPawn.state, PawnState.inHomeStretch, reason: "Pawn should be in home stretch");
+      expect(testPawn.position, 0, reason: "Pawn should be at position 0 of home stretch");
+      expect(gameState.getCurrentPlayer(), p2HumanGreen, reason: "Turn should pass to Green player (rolled 1)");
+    });
+
+    test('Pawn moves within its home stretch (Red pawn)', () {
+      Pawn testPawn = setupPawn(p1HumanRed, 0, PawnState.inHomeStretch, 1); // Pawn in home stretch at pos 1
+
+      gameState.game.dice.currentValue = 2;
+      gameState.rollDice();
+
+      gameState.selectPawn(testPawn);
+      gameState.attemptMoveSelectedPawn();
+
+      expect(testPawn.state, PawnState.inHomeStretch, reason: "Pawn should still be in home stretch");
+      expect(testPawn.position, 3, reason: "Pawn should move to position 3 in home stretch");
+      expect(gameState.getCurrentPlayer(), p2HumanGreen, reason: "Turn should pass to Green player (rolled 2)");
+    });
+
+    test('Pawn finishes correctly from home stretch (Red pawn)', () {
+      // Home stretch is 0-5. Position 4 is (Game.homeColumnSize - 2). Goal is index 5 (homeColumnSize - 1).
+      Pawn testPawn = setupPawn(p1HumanRed, 0, PawnState.inHomeStretch, Game.homeColumnSize - 2);
+
+      gameState.game.dice.currentValue = 1; // Needs 1 to land on goal (pos 5)
+      gameState.rollDice();
+
+      gameState.selectPawn(testPawn);
+      gameState.attemptMoveSelectedPawn();
+
+      expect(testPawn.state, PawnState.finished, reason: "Pawn should be finished");
+      expect(testPawn.position, Game.finishedPositionValue, reason: "Pawn position should be the finished value");
+      expect(gameState.getCurrentPlayer(), p2HumanGreen, reason: "Turn should pass to Green player (rolled 1)");
+    });
+
+    test('Pawn move rejected if overshoots in home stretch (Red pawn)', () {
+      Pawn testPawn = setupPawn(p1HumanRed, 0, PawnState.inHomeStretch, 3); // Pawn at pos 3 in home stretch
+                                                                           // Goal is pos 5. Needs 2 to finish.
+      int initialPosition = testPawn.position;
+
+      gameState.game.dice.currentValue = 4; // Rolling 4 will overshoot (3+4=7, homeColumnSize=6)
+      gameState.rollDice();
+
+      gameState.selectPawn(testPawn);
+      // attemptMoveSelectedPawn calls _game.movePawn which should return false
+      // GameState.attemptMoveSelectedPawn does not directly return the bool,
+      // but we can check its side effects.
+      gameState.attemptMoveSelectedPawn();
+
+      expect(testPawn.state, PawnState.inHomeStretch, reason: "Pawn should remain in home stretch");
+      expect(testPawn.position, initialPosition, reason: "Pawn position should not change on failed move");
+      // Sticky dice value should persist, allowing player to select another pawn.
+      // Current player should still be Red.
+      expect(gameState.getCurrentPlayer(), p1HumanRed, reason: "Player Red should retain turn on failed move");
+    });
+
+    test('Pawn on main track NOT entering home stretch prematurely (Red pawn)', () {
+      Pawn testPawn = setupPawn(p1HumanRed, 0, PawnState.onBoard, 48);
+
+      gameState.game.dice.currentValue = 2; // Lands on 50 (Red entry is 51)
+      gameState.rollDice();
+
+      gameState.selectPawn(testPawn);
+      gameState.attemptMoveSelectedPawn();
+
+      expect(testPawn.state, PawnState.onBoard, reason: "Pawn should remain on board");
+      expect(testPawn.position, 50, reason: "Pawn should be at position 50");
+      expect(gameState.getCurrentPlayer(), p2HumanGreen, reason: "Turn should pass to Green (rolled 2)");
+    });
+
+    test('Pawn on main track correctly enters home stretch on exact roll (Green pawn transition)', () {
+      // Switch to Green's turn for this test
+      gameState.game.currentPlayerIndex = gameState.players.indexOf(p2HumanGreen);
+      expect(gameState.getCurrentPlayer(), p2HumanGreen);
+
+      // Green pawn at 11 (Green entry is 12, start is 13)
+      Pawn testPawn = setupPawn(p2HumanGreen, 0, PawnState.onBoard, 11);
+
+      gameState.game.dice.currentValue = 3; // Roll 3: 11->12(entry)->HS_0->HS_1
+      gameState.rollDice();
+
+      gameState.selectPawn(testPawn);
+      gameState.attemptMoveSelectedPawn();
+
+      expect(testPawn.state, PawnState.inHomeStretch, reason: "Green pawn should be in home stretch");
+      expect(testPawn.position, 1, reason: "Green pawn should be at position 1 of its home stretch");
+      // Turn should pass back to Red (or next player if >2) because Green rolled 3
+      expect(gameState.getCurrentPlayer(), p1HumanRed, reason: "Turn should pass to Red player");
+    });
+  });
 }

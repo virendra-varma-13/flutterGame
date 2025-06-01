@@ -6,6 +6,7 @@ import 'package:ludo/models/player.dart'; // For type hinting if needed
 class GameState extends ChangeNotifier {
   late Game _game;
   Pawn? _selectedPawn;
+  int? _stickyDiceValue; // To hold the dice value for the current player's action
   int _numPlayers = 2; // Default, will be overridden by resetGame
   bool _playWithAI = false; // Default
 
@@ -31,20 +32,29 @@ class GameState extends ChangeNotifier {
   // Methods to modify game state
   void rollDice() {
     _game.rollDice();
+    _stickyDiceValue = _game.dice.currentValue; // Store the rolled value
     notifyListeners();
 
-    // New logic for auto-passing human player's turn
+    // New logic for auto-passing human player's turn, using _stickyDiceValue
     Player currentPlayer = getCurrentPlayer();
-    int currentDiceValue = _game.dice.currentValue;
+    // Ensure _stickyDiceValue is not null here, as it's just been set.
+    if (_stickyDiceValue == null) {
+        debugPrint("Error: _stickyDiceValue is null immediately after roll. This should not happen.");
+        // Fallback or error handling if necessary, though theoretically unreachable.
+        // For safety, AI check might be skipped or handled.
+        // However, the primary concern is the auto-pass logic.
+        // If _stickyDiceValue is null, it cannot satisfy "!= 6".
+        // To be safe, let's assume if it's null, we don't auto-pass.
+        // This situation indicates a deeper issue if it occurs.
+    }
+
     if (!currentPlayer.isAI &&
-        currentDiceValue != 6 &&
+        _stickyDiceValue != null && // Added null check for safety
+        _stickyDiceValue != 6 &&
         currentPlayer.getOnBoardPawns().isEmpty) {
       debugPrint(
-          "Human player ${currentPlayer.color} rolled $currentDiceValue and has no pawns on board. Auto-passing turn.");
-      nextTurn(); // nextTurn already calls notifyListeners
-      // Return to prevent AI turn logic from executing if it's somehow triggered
-      // This is a safeguard, as nextTurn() should change the player.
-      // If the next player is AI, the nextTurn() -> _handleAITurn() will manage it.
+          "Human player ${currentPlayer.color} rolled $_stickyDiceValue and has no pawns on board. Auto-passing turn.");
+      nextTurn(); // nextTurn already calls notifyListeners and clears _stickyDiceValue
       return;
     }
 
@@ -55,6 +65,7 @@ class GameState extends ChangeNotifier {
   }
 
   void nextTurn() {
+    _stickyDiceValue = null; // Clear sticky dice value on any turn change
     _game.nextTurn();
     _selectedPawn = null; // Clear selected pawn on turn change
     notifyListeners();
@@ -90,36 +101,40 @@ class GameState extends ChangeNotifier {
       return;
     }
 
-    int currentDiceValue = _game.dice.currentValue;
-    if (currentDiceValue == 0) { // Assuming 0 means dice not rolled or invalid state
-        debugPrint("Dice has not been rolled or shows 0.");
-        return;
+    // Use the _stickyDiceValue for the move attempt
+    int? moveDiceValue = _stickyDiceValue;
+
+    if (moveDiceValue == null) {
+      debugPrint("Error: attemptMoveSelectedPawn called but _stickyDiceValue is null. Roll dice first.");
+      // Optionally provide user feedback via a message
+      return;
     }
 
+    // The check for currentDiceValue == 0 is no longer needed here if _stickyDiceValue guarantees a valid roll.
+    // However, if _stickyDiceValue could be 0 from a "bad roll" (if dice could roll 0), it might be relevant.
+    // Assuming dice rolls 1-6.
+
     // Call the game logic's movePawn
-    // The Game model's movePawn now takes steps (dice value) directly.
-    bool moveSuccessful = _game.movePawn(_selectedPawn!, currentDiceValue);
+    bool moveSuccessful = _game.movePawn(_selectedPawn!, moveDiceValue);
 
     if (moveSuccessful) {
-      // Standard Ludo rule: if a 6 is rolled, player gets another turn.
-      // Also, if a pawn moves out of home or captures (not yet implemented), player might get another turn.
-      // For now, simplified: only a 6 grants another turn.
-      if (currentDiceValue == 6) {
-        debugPrint("Rolled a 6, player gets another turn.");
-        // Player might want to roll again or move another pawn if applicable.
-        // For now, we just don't switch turns.
+      _stickyDiceValue = null; // Consume the dice value after a successful move
+      _selectedPawn = null; // Clear selection after a successful move attempt.
+
+      if (moveDiceValue == 6) {
+        debugPrint("Rolled a 6, player gets another turn. Roll dice again.");
+        // Player gets another turn, they need to roll dice again.
+        // _stickyDiceValue is now null, so they can't move again with the same 6.
+        // No call to nextTurn() here.
       } else {
         // If not a 6, switch to the next player.
-        _game.nextTurn();
+        nextTurn(); // This will also clear _stickyDiceValue again, which is fine.
       }
-      _selectedPawn = null; // Clear selection after a successful move attempt.
     } else {
-      // If the move was not successful (e.g., pawn at home and not a 6),
-      // provide feedback to the user.
-      // The turn might still pass if no other pawn can be moved with the current dice roll.
-      // This part of logic (checking if any move is possible) is not yet implemented.
-      // For now, if a move fails, the turn doesn't automatically switch, allowing player to select another pawn.
-      debugPrint("Move for ${_selectedPawn!.id} of ${_selectedPawn!.color} was not successful with dice $currentDiceValue.");
+      // If the move was not successful, _stickyDiceValue remains unchanged.
+      // This allows the player to select another pawn and try to move it with the same dice value.
+      debugPrint("Move for ${_selectedPawn!.id} of ${_selectedPawn!.color} was not successful with dice $moveDiceValue.");
+      // Do not clear _selectedPawn here, player might want to re-evaluate or it's cleared if they select another.
     }
     notifyListeners();
   }
@@ -130,6 +145,7 @@ class GameState extends ChangeNotifier {
     _playWithAI = playWithAI;
     _game = Game(numPlayersToCreate: _numPlayers, playWithAI: _playWithAI);
     _selectedPawn = null;
+    _stickyDiceValue = null; // Clear sticky dice value on game reset
     debugPrint("Game reset in GameState: Players: $_numPlayers, AI: $_playWithAI. Actual players in game: ${_game.players.length}");
     if (_playWithAI && _game.players.isNotEmpty && _game.players.last.isAI) {
       debugPrint("AI Player confirmed: ${_game.players.last.color}");
@@ -161,34 +177,36 @@ class GameState extends ChangeNotifier {
 
     // Corrected AI dice roll:
     _game.dice.roll(); // AI rolls the dice internally
-    debugPrint("AI rolled: ${diceValue}");
+    _stickyDiceValue = _game.dice.currentValue; // AI also uses sticky dice value for its turn.
+    debugPrint("AI rolled: $_stickyDiceValue");
     notifyListeners(); // Notify UI about dice roll
 
     await Future.delayed(const Duration(milliseconds: 500)); // Short delay after showing dice roll
 
     // 2. Find a movable pawn
     Player aiPlayer = getCurrentPlayer();
-    List<Pawn> movablePawns = _game.getMovablePawns(aiPlayer, diceValue);
+    // AI needs to use _stickyDiceValue to find movable pawns.
+    // Ensure _stickyDiceValue is not null for AI's decision process.
+    if (_stickyDiceValue == null) {
+      debugPrint("Error: AI turn, but _stickyDiceValue is null after roll. This should not happen.");
+      nextTurn(); // Pass turn if AI cannot determine its move due to missing dice value
+      return;
+    }
+    List<Pawn> movablePawns = _game.getMovablePawns(aiPlayer, _stickyDiceValue!);
 
     if (movablePawns.isNotEmpty) {
       Pawn pawnToMove = movablePawns.first; // Simplest strategy: pick the first movable pawn
       debugPrint("AI selected pawn: ${pawnToMove.id} at ${pawnToMove.position}");
-
-      // We need to set this as the selectedPawn for attemptMoveSelectedPawn to work
       _selectedPawn = pawnToMove; // AI "selects" the pawn
-      // No need to notifyListeners for pawn selection if it's an internal AI step before immediate move.
-      // However, if we want UI to show AI's selection briefly, we could:
-      // notifyListeners();
-      // await Future.delayed(const Duration(milliseconds: 500));
 
-      attemptMoveSelectedPawn(); // This method handles notifyListeners and nextTurn logic
+      // AI calls attemptMoveSelectedPawn, which will use _stickyDiceValue
+      attemptMoveSelectedPawn();
     } else {
-      debugPrint("AI has no movable pawns with dice value $diceValue.");
+      debugPrint("AI has no movable pawns with dice value $_stickyDiceValue.");
       // If no pawn is movable, the AI's turn ends.
-      // attemptMoveSelectedPawn already calls nextTurn if move fails or not a 6.
-      // But if no pawns are movable AT ALL, attemptMoveSelectedPawn is not called.
-      // So, we need to call nextTurn here.
-      nextTurn(); // This will also trigger _handleAITurn if the next player is AI.
+      // attemptMoveSelectedPawn is not called, so _stickyDiceValue is not consumed by it.
+      // nextTurn() will clear _stickyDiceValue.
+      nextTurn();
     }
   }
 }
