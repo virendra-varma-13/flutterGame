@@ -10,6 +10,9 @@ class GameState extends ChangeNotifier {
   int _numPlayers = 2; // Default, will be overridden by resetGame
   bool _playWithAI = false; // Default
 
+  List<Pawn> highlightedPawnsForSelection = [];
+  bool isAwaitingHumanSelection = false;
+
   // Initialize the game with default settings or specified ones.
   // The main initialization will now happen via resetGame from MyHomePage.
   GameState() {
@@ -31,90 +34,171 @@ class GameState extends ChangeNotifier {
 
   // Methods to modify game state
   void rollDice() {
-    _game.rollDice();
-    _stickyDiceValue = _game.dice.currentValue; // Store the rolled value
-    notifyListeners(); // UI shows dice value
+    debugPrint("Human player ${getCurrentPlayer().color} triggered rollDice().");
+    Player currentPlayer = getCurrentPlayer();
 
-    Player currentPlayer = getCurrentPlayer(); // Get current player
-
-    // Defensive check, though _stickyDiceValue should always be set above.
-    if (_stickyDiceValue == null) {
-        debugPrint("RollDice: Error - _stickyDiceValue is null immediately after roll and assignment. This indicates a critical issue.");
-        // Potentially handle error, like ending turn or showing error to user.
-        // For now, proceeding will likely fail in subsequent checks or actions.
-        // If AI's turn, it might also fail.
+    if (currentPlayer.isAI) {
+        debugPrint("rollDice() called, but it's AI's turn (${currentPlayer.color}). Ignoring.");
+        return;
+    }
+    if (isAwaitingHumanSelection) {
+        debugPrint("rollDice() called for ${currentPlayer.color}, but awaiting pawn selection. Ignoring.");
+        return;
+    }
+    // Check if player is rolling again after a 6.
+    // If _stickyDiceValue is null, it means the previous 6 was consumed by a move, or this is the first roll.
+    // If _stickyDiceValue is 6, it means they rolled 6, made no move (no valid moves), and are rolling again.
+    if (_stickyDiceValue != null && _stickyDiceValue == 6) {
+        debugPrint("Player ${currentPlayer.color} had a 6 (no move made or previous move was a 6), rolling again.");
+        // Proceed to roll is fine. _stickyDiceValue will be overwritten.
+    } else if (_stickyDiceValue != null && _stickyDiceValue != 6) {
+        // This state should ideally not be reached if UI disables roll button until a non-6 roll is resolved.
+        debugPrint("Warning: rollDice() called by ${currentPlayer.color} but a previous non-6 stickyDiceValue ($_stickyDiceValue) exists. Overwriting.");
     }
 
-    // --- START: New Auto-move logic for human player with all pawns home on a 6 ---
-    if (!currentPlayer.isAI && _stickyDiceValue == 6) {
-        bool allPawnsAtHome = currentPlayer.pawns.every((p) => p.state == PawnState.home);
-        if (allPawnsAtHome) {
-            debugPrint("Auto-move: Player ${currentPlayer.color} rolled 6 with all pawns home.");
-            // getHomePawns() might not exist, using direct filter.
+    // Perform the dice roll
+    _game.dice.roll();
+    _stickyDiceValue = _game.dice.currentValue;
+
+    // Reset selection states for the new roll
+    isAwaitingHumanSelection = false;
+    highlightedPawnsForSelection = [];
+    _selectedPawn = null; // Clear previous selection if any
+
+    notifyListeners(); // UI shows the new dice roll
+    debugPrint("Human player ${currentPlayer.color} rolled $_stickyDiceValue.");
+
+    // Ensure stickyDiceValue is not null after roll (shouldn't be)
+    if (_stickyDiceValue == null) {
+        debugPrint("CRITICAL: _stickyDiceValue is null immediately after roll for ${currentPlayer.color}. Aborting further actions.");
+        // This might indicate an issue with _game.dice.roll() or its assignment.
+        return;
+    }
+
+    // Conditional Automation Logic
+    bool allPawnsAtHome = currentPlayer.pawns.every((p) => p.state == PawnState.home);
+
+    if (allPawnsAtHome) {
+        if (_stickyDiceValue == 6) {
+            debugPrint("Auto-move: Rolled 6, all pawns home for ${currentPlayer.color}.");
             List<Pawn> homePawns = currentPlayer.pawns.where((p) => p.state == PawnState.home).toList();
-            if (homePawns.isNotEmpty) { // Should always be true if allPawnsAtHome is true and pawns.length > 0
-                Pawn pawnToMove = homePawns.first; // Select the first available home pawn
-                _selectedPawn = pawnToMove; // Internal selection
-                debugPrint("Auto-move: Selecting pawn ${pawnToMove.id}-${pawnToMove.color} for player ${currentPlayer.color}.");
-                attemptMoveSelectedPawn(); // This handles 'another turn on 6' & clears sticky value if move is successful
-                return; // Action for this roll is complete
+            if (homePawns.isNotEmpty) { // Should be true if allPawnsAtHome
+                 Pawn pawnToMove = homePawns.first;
+                _selectedPawn = pawnToMove;
+                attemptMoveSelectedPawn(); // Handles 'another turn' internally by not calling nextTurn()
             } else {
-                debugPrint("Auto-move: Player ${currentPlayer.color} rolled 6, all pawns home, but no home pawns found in list. Skipping auto-move.");
+                debugPrint("Error: All pawns reported home for ${currentPlayer.color}, but no home pawns found in list.");
+                // Fall through to other logic, though this state is inconsistent.
             }
+            return; // Action complete or another turn is set up by attemptMoveSelectedPawn
+        } else { // Not a 6, all pawns home
+            debugPrint("Auto-pass: Rolled $_stickyDiceValue (not 6), all pawns home for ${currentPlayer.color}.");
+            nextTurn();
+            return;
         }
     }
-    // --- END: New Auto-move logic ---
 
-    // Existing auto-pass logic for human (non-6 roll, no pawns out on board or in home stretch)
-    // Added check for pawns in home stretch as well.
-    if (!currentPlayer.isAI &&
-        _stickyDiceValue != null &&
-        _stickyDiceValue != 6 &&
-        currentPlayer.getOnBoardPawns().isEmpty &&
-        currentPlayer.pawns.where((p) => p.state == PawnState.inHomeStretch).toList().isEmpty) {
-      debugPrint(
-          "Auto-pass: Human player ${currentPlayer.color} rolled $_stickyDiceValue and has no pawns on board or in home stretch. Auto-passing turn.");
-      nextTurn(); // nextTurn calls notifyListeners and clears _stickyDiceValue
-      return;
+    // Some Pawns Are Out (Not All Home)
+    List<Pawn> movablePawns = _game.getMovablePawns(currentPlayer, _stickyDiceValue!);
+    debugPrint("Player ${currentPlayer.color} (not all pawns home) has ${movablePawns.length} movable pawns with dice $_stickyDiceValue.");
+
+    if (movablePawns.isEmpty) {
+        if (_stickyDiceValue == 6) {
+            debugPrint("No moves available for ${currentPlayer.color} on a 6. Player gets another roll.");
+            _stickyDiceValue = null; // Consume the 6 for this specific action attempt
+            // Player remains current. UI should allow another roll.
+            notifyListeners(); // Reflect that the dice action is done (sticky is null)
+            return;
+        } else { // Not a 6, no moves
+            debugPrint("No moves available for ${currentPlayer.color} on $_stickyDiceValue. Passing turn.");
+            nextTurn();
+            return;
+        }
     }
 
-    // Existing AI turn check.
-    // This will be reached if:
-    // 1. It was AI's turn initially.
-    // 2. It was Human's turn, they didn't trigger auto-move (e.g., not all pawns home, or not a 6).
-    // 3. It was Human's turn, they didn't trigger auto-pass (e.g., rolled 6, or has pawns out).
-    // If nextTurn() was called by auto-pass, and the new player is AI, _handleAITurn is called within nextTurn().
-    // So, this check here primarily handles the case where it was AI's turn from the beginning of rollDice(),
-    // or if a human player's turn continues (e.g. rolled 6, has pawns out, didn't auto-move).
-    // If it's a human player's turn and they completed their action (auto-move or auto-pass), a 'return' was hit.
-    if (getCurrentPlayer().isAI) { // Check the current player (could have changed if nextTurn was called)
-      _handleAITurn();
+    if (movablePawns.length == 1) {
+        debugPrint("Auto-move: Single move available for ${currentPlayer.color} with $_stickyDiceValue.");
+        _selectedPawn = movablePawns.first;
+        attemptMoveSelectedPawn(); // Handles 'another turn' or passes turn
+        return;
     }
+
+    // movablePawns.length > 1
+    debugPrint("Multiple moves available for ${currentPlayer.color} with $_stickyDiceValue. Awaiting selection.");
+    highlightedPawnsForSelection = List.from(movablePawns);
+    isAwaitingHumanSelection = true;
+    notifyListeners(); // UI highlights pawns
+    // _stickyDiceValue is kept for when the player selects a pawn.
   }
 
   void nextTurn() {
-    _stickyDiceValue = null; // Clear sticky dice value on any turn change
+    _stickyDiceValue = null;
     _game.nextTurn();
-    _selectedPawn = null; // Clear selected pawn on turn change
+    _selectedPawn = null;
+
+    highlightedPawnsForSelection = [];
+    isAwaitingHumanSelection = false;
+
     notifyListeners();
 
-    // Check for AI turn after turn changes
-    if (getCurrentPlayer().isAI) {
+    Player newCurrentPlayer = getCurrentPlayer();
+    debugPrint("NextTurn: Changed to player ${newCurrentPlayer.color}, AI: ${newCurrentPlayer.isAI}");
+    if (newCurrentPlayer.isAI) {
       _handleAITurn();
     }
+    // If human, UI should enable their roll dice button. GameState waits for UI interaction.
   }
 
   void selectPawn(Pawn pawn) {
-    // Basic selection logic:
-    // Only allow selection if it's the current player's pawn.
-    if (pawn.color == getCurrentPlayer().color) {
-      _selectedPawn = pawn;
-      notifyListeners();
+    if (isAwaitingHumanSelection) {
+        // Check if the provided pawn instance is among the highlighted ones by ID and color
+        bool isValidSelection = highlightedPawnsForSelection.any((p) => p.id == pawn.id && p.color == pawn.color);
+
+        if (isValidSelection) {
+            // To ensure we use the authoritative pawn object from the game model,
+            // especially if 'pawn' comes directly from UI and might be a different instance.
+            Player currentPlayer = getCurrentPlayer();
+            Pawn? authoritativePawnFromList;
+            try {
+                authoritativePawnFromList = currentPlayer.pawns.firstWhere(
+                    (p) => p.id == pawn.id && p.color == pawn.color
+                );
+            } catch (e) {
+                debugPrint("SelectPawn: Error finding authoritative pawn for selected pawn ${pawn.id}-${pawn.color}. Error: $e");
+                // Potentially reset selection state or provide feedback
+                isAwaitingHumanSelection = false;
+                highlightedPawnsForSelection = [];
+                notifyListeners();
+                return;
+            }
+            _selectedPawn = authoritativePawnFromList; // Use the instance from the player's list
+
+            debugPrint("SelectPawn: Human selected highlighted pawn: ${_selectedPawn!.id}-${_selectedPawn!.color}. Attempting move.");
+            isAwaitingHumanSelection = false;
+            highlightedPawnsForSelection = [];
+            // _stickyDiceValue should still be set from _initiateHumanTurnActions
+            attemptMoveSelectedPawn();
+            // If attemptMoveSelectedPawn results in another turn (e.g. rolled 6),
+            // the game flow should re-trigger _initiateHumanTurnActions.
+        } else {
+            debugPrint("SelectPawn: Invalid selection. Pawn ${pawn.id}-${pawn.color} not in highlighted list: ${highlightedPawnsForSelection.map((p) => '${p.id}-${p.color}').join(', ')}");
+            // Do not clear isAwaitingHumanSelection or highlightedPawns here, user might try again.
+            // Optionally provide feedback to UI if needed.
+        }
     } else {
-      // Optionally, provide feedback that this pawn cannot be selected
-      debugPrint("Cannot select pawn: Not current player's pawn.");
+        // This path handles pawn selection when not in 'isAwaitingHumanSelection' mode.
+        // e.g., AI might use this, or future features.
+        // For current human flow, selection should primarily occur via the above block.
+        debugPrint("SelectPawn: Called when not awaiting human selection. Current player: ${getCurrentPlayer().color}, selected: ${pawn.id}-${pawn.color}");
+        if (pawn.color == getCurrentPlayer().color) {
+            _selectedPawn = pawn; // Allow selection if it's their pawn
+            notifyListeners();
+            debugPrint("SelectPawn (non-awaited): Selected pawn ${pawn.id}-${pawn.color}");
+        } else {
+            debugPrint("SelectPawn (non-awaited): Cannot select pawn ${pawn.id}-${pawn.color}. Not current player's ${getCurrentPlayer().color} pawn.");
+        }
     }
-  }
+}
 
   // Attempts to move the currently selected pawn using the current dice value.
   void attemptMoveSelectedPawn() {
@@ -192,14 +276,22 @@ class GameState extends ChangeNotifier {
     _game = Game(numPlayersToCreate: _numPlayers, playWithAI: _playWithAI);
     _selectedPawn = null;
     _stickyDiceValue = null; // Clear sticky dice value on game reset
+    highlightedPawnsForSelection = []; // Clear highlights
+    isAwaitingHumanSelection = false; // Reset selection mode
     debugPrint("Game reset in GameState: Players: $_numPlayers, AI: $_playWithAI. Actual players in game: ${_game.players.length}");
     if (_playWithAI && _game.players.isNotEmpty && _game.players.last.isAI) {
       debugPrint("AI Player confirmed: ${_game.players.last.color}");
     }
-    notifyListeners();
-    // Check if the first player is AI and trigger their turn
-    if (getCurrentPlayer().isAI) {
+    notifyListeners(); // Initial notification for game setup
+
+    // Determine and initiate first player's turn
+    Player firstPlayer = getCurrentPlayer();
+    if (firstPlayer.isAI) {
+        debugPrint("ResetGame: First player is AI (${firstPlayer.color}). Handling AI turn.");
         _handleAITurn();
+    } else {
+        debugPrint("ResetGame: First player is Human (${firstPlayer.color}). UI should enable roll dice.");
+        // No direct action here, UI will enable rollDice for the human player.
     }
   }
 
