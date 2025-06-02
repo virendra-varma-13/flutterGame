@@ -413,4 +413,138 @@ void main() {
       expect(gameState.getCurrentPlayer(), p1HumanRed, reason: "Turn should pass to Red player");
     });
   });
+
+  group('Automated Game Actions and Turn Logic', () {
+    late GameState gameState;
+    late Player p1HumanRed;
+    late Player p2HumanGreen;
+
+    // Re-using setup helpers from 'Pawn Movement and Home Stretch Logic'
+    // Helper to initialize a standard 2-player game (Red, Green), both human
+    void setupTestGame() {
+      gameState = GameState();
+      gameState.resetGame(numPlayers: 2, playWithAI: false);
+      p1HumanRed = gameState.players[0];
+      p2HumanGreen = gameState.players[1];
+      expect(p1HumanRed.color, "Red");
+      expect(p2HumanGreen.color, "Green");
+      gameState.game.currentPlayerIndex = gameState.players.indexOf(p1HumanRed);
+      expect(gameState.getCurrentPlayer(), p1HumanRed);
+    }
+
+    Pawn setupPawn(Player player, int pawnId, PawnState state, int position) {
+      Pawn pawn = player.pawns.firstWhere((p) => p.id == pawnId);
+      pawn.state = state;
+      pawn.position = position;
+      return pawn;
+    }
+
+    void setAllPawnsHome(Player player) {
+      for (var pawn in player.pawns) {
+        pawn.state = PawnState.home;
+        pawn.position = -1;
+      }
+      expect(player.pawns.every((p) => p.state == PawnState.home), isTrue);
+    }
+
+    setUp(() {
+      setupTestGame();
+    });
+
+    // Test Case 1 (Re-verify manual move from home)
+    test('Manual move from home on 6 works correctly', () {
+      setAllPawnsHome(p1HumanRed);
+      expect(p1HumanRed.pawns[0].state, PawnState.home);
+
+      gameState.game.dice.currentValue = 6;
+      gameState.rollDice(); // Sets _stickyDiceValue
+
+      // Player manually selects pawn and attempts move
+      gameState.selectPawn(p1HumanRed.pawns[0]);
+      gameState.attemptMoveSelectedPawn();
+
+      expect(p1HumanRed.pawns[0].state, PawnState.onBoard, reason: "Pawn should be on board");
+      expect(p1HumanRed.pawns[0].position, Game.startPositions["Red"], reason: "Pawn should be at Red's start position");
+      expect(gameState.getCurrentPlayer(), p1HumanRed, reason: "Player should get another turn after rolling a 6");
+    });
+
+    // Test Cases for New Auto-Move Feature
+    test('Auto-move on 6 with all pawns home', () {
+      setAllPawnsHome(p1HumanRed);
+
+      gameState.game.dice.currentValue = 6;
+      gameState.rollDice(); // This should trigger the auto-move
+
+      // Find the pawn that should have moved (assuming pawn with id 0 is 'homePawns.first')
+      Pawn movedPawn = p1HumanRed.pawns.firstWhere((p) => p.id == 0);
+      expect(movedPawn.state, PawnState.onBoard, reason: "A pawn should have auto-moved to onBoard");
+      expect(movedPawn.position, Game.startPositions["Red"], reason: "Moved pawn should be at start position");
+      expect(gameState.getCurrentPlayer(), p1HumanRed, reason: "Player should get another turn (auto-move was on a 6)");
+      // _stickyDiceValue should be null as attemptMoveSelectedPawn consumes it.
+      // We can test this indirectly: if another move is attempted without roll, it should fail or not use 6.
+      // For now, the above checks are primary.
+    });
+
+    test('No auto-move on 6 if a pawn is already out', () {
+      setAllPawnsHome(p1HumanRed);
+      setupPawn(p1HumanRed, 0, PawnState.onBoard, 10); // One pawn is out
+
+      gameState.game.dice.currentValue = 6;
+      gameState.rollDice();
+
+      // Check that no pawn moved automatically (i.e., other home pawns are still home)
+      expect(p1HumanRed.pawns.where((p) => p.state == PawnState.home).length, 3, reason: "Other 3 pawns should still be home");
+      Pawn pawnOnBoard = p1HumanRed.pawns.firstWhere((p) => p.id == 0);
+      expect(pawnOnBoard.position, 10, reason: "Pawn on board should not have moved automatically"); // Its position is unchanged
+      expect(gameState.getCurrentPlayer(), p1HumanRed, reason: "Player should retain turn (rolled 6)");
+      // _stickyDiceValue should be 6, available for manual move.
+      // gameState.selectPawn(pawnOnBoard);
+      // gameState.attemptMoveSelectedPawn(); // this would use the 6
+      // expect(pawnOnBoard.position, 16); // example
+    });
+
+    test('No auto-move if roll is not 6 (all pawns home), turn passes', () {
+      setAllPawnsHome(p1HumanRed);
+
+      gameState.game.dice.currentValue = 5;
+      gameState.rollDice(); // Should trigger auto-pass
+
+      expect(p1HumanRed.pawns.every((p) => p.state == PawnState.home), isTrue, reason: "All pawns should still be home");
+      expect(gameState.getCurrentPlayer(), p2HumanGreen, reason: "Turn should pass to next player (auto-pass)");
+    });
+
+    // Test Cases for Refined Auto-Pass Logic
+    test('Auto-pass does NOT occur if pawn in home stretch, non-6 roll', () {
+      setAllPawnsHome(p1HumanRed); // All home initially
+      Pawn testPawn = setupPawn(p1HumanRed, 0, PawnState.inHomeStretch, 2); // One pawn in home stretch
+
+      gameState.game.dice.currentValue = 3;
+      gameState.rollDice();
+
+      expect(gameState.getCurrentPlayer(), p1HumanRed, reason: "Player Red should still be current (no auto-pass)");
+      // _stickyDiceValue should be 3, available for manual move
+      // gameState.selectPawn(testPawn);
+      // gameState.attemptMoveSelectedPawn();
+      // expect(testPawn.position, 5); // example, would finish
+    });
+
+    test('Auto-pass DOES occur if all pawns home, non-6 roll (verify existing refined)', () {
+      setAllPawnsHome(p1HumanRed);
+
+      gameState.game.dice.currentValue = 3;
+      gameState.rollDice(); // Should trigger auto-pass
+
+      expect(gameState.getCurrentPlayer(), p2HumanGreen, reason: "Turn should pass to Green (auto-pass with all home)");
+    });
+
+    test('Auto-pass does NOT occur if pawn on board, non-6 roll (verify existing refined)', () {
+      setAllPawnsHome(p1HumanRed);
+      setupPawn(p1HumanRed, 0, PawnState.onBoard, 15); // One pawn on board
+
+      gameState.game.dice.currentValue = 3;
+      gameState.rollDice();
+
+      expect(gameState.getCurrentPlayer(), p1HumanRed, reason: "Player Red should still be current (pawn on board)");
+    });
+  });
 }

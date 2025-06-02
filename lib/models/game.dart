@@ -151,18 +151,19 @@ class Game {
     }
 
     if (pawn.state == PawnState.home) {
+      debugPrint("Game.movePawn (Home): Received pawn ${pawn.id}-${pawn.color} with state ${pawn.state.name}, steps: $steps");
       if (steps == 6) {
         int? startPos = startPositions[pawn.color];
         if (startPos == null) {
-          debugPrint("Error: Start position not defined for color ${pawn.color}");
+          debugPrint("Game.movePawn (Home): Error - Start position not defined for color ${pawn.color}");
           return false;
         }
         pawn.position = startPos;
-        pawn.state = PawnState.onBoard;
-        debugPrint("Pawn ${pawn.id} of ${pawn.color} moved out of home to $startPos");
+        pawn.state = PawnState.onBoard; // Ensure this is set before return
+        debugPrint("Game.movePawn (Home): Pawn ${pawn.id}-${pawn.color} IS moving out. Position: $startPos, New State: ${pawn.state.name}");
         return true;
       } else {
-        debugPrint("Pawn ${pawn.id} of ${pawn.color} needs a 6 to move out of home.");
+        debugPrint("Game.movePawn (Home): Pawn ${pawn.id}-${pawn.color} needs 6, got $steps. Not moving.");
         return false;
       }
     } else if (pawn.state == PawnState.onBoard) {

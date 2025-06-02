@@ -33,33 +33,61 @@ class GameState extends ChangeNotifier {
   void rollDice() {
     _game.rollDice();
     _stickyDiceValue = _game.dice.currentValue; // Store the rolled value
-    notifyListeners();
+    notifyListeners(); // UI shows dice value
 
-    // New logic for auto-passing human player's turn, using _stickyDiceValue
-    Player currentPlayer = getCurrentPlayer();
-    // Ensure _stickyDiceValue is not null here, as it's just been set.
+    Player currentPlayer = getCurrentPlayer(); // Get current player
+
+    // Defensive check, though _stickyDiceValue should always be set above.
     if (_stickyDiceValue == null) {
-        debugPrint("Error: _stickyDiceValue is null immediately after roll. This should not happen.");
-        // Fallback or error handling if necessary, though theoretically unreachable.
-        // For safety, AI check might be skipped or handled.
-        // However, the primary concern is the auto-pass logic.
-        // If _stickyDiceValue is null, it cannot satisfy "!= 6".
-        // To be safe, let's assume if it's null, we don't auto-pass.
-        // This situation indicates a deeper issue if it occurs.
+        debugPrint("RollDice: Error - _stickyDiceValue is null immediately after roll and assignment. This indicates a critical issue.");
+        // Potentially handle error, like ending turn or showing error to user.
+        // For now, proceeding will likely fail in subsequent checks or actions.
+        // If AI's turn, it might also fail.
     }
 
+    // --- START: New Auto-move logic for human player with all pawns home on a 6 ---
+    if (!currentPlayer.isAI && _stickyDiceValue == 6) {
+        bool allPawnsAtHome = currentPlayer.pawns.every((p) => p.state == PawnState.home);
+        if (allPawnsAtHome) {
+            debugPrint("Auto-move: Player ${currentPlayer.color} rolled 6 with all pawns home.");
+            // getHomePawns() might not exist, using direct filter.
+            List<Pawn> homePawns = currentPlayer.pawns.where((p) => p.state == PawnState.home).toList();
+            if (homePawns.isNotEmpty) { // Should always be true if allPawnsAtHome is true and pawns.length > 0
+                Pawn pawnToMove = homePawns.first; // Select the first available home pawn
+                _selectedPawn = pawnToMove; // Internal selection
+                debugPrint("Auto-move: Selecting pawn ${pawnToMove.id}-${pawnToMove.color} for player ${currentPlayer.color}.");
+                attemptMoveSelectedPawn(); // This handles 'another turn on 6' & clears sticky value if move is successful
+                return; // Action for this roll is complete
+            } else {
+                debugPrint("Auto-move: Player ${currentPlayer.color} rolled 6, all pawns home, but no home pawns found in list. Skipping auto-move.");
+            }
+        }
+    }
+    // --- END: New Auto-move logic ---
+
+    // Existing auto-pass logic for human (non-6 roll, no pawns out on board or in home stretch)
+    // Added check for pawns in home stretch as well.
     if (!currentPlayer.isAI &&
-        _stickyDiceValue != null && // Added null check for safety
+        _stickyDiceValue != null &&
         _stickyDiceValue != 6 &&
-        currentPlayer.getOnBoardPawns().isEmpty) {
+        currentPlayer.getOnBoardPawns().isEmpty &&
+        currentPlayer.pawns.where((p) => p.state == PawnState.inHomeStretch).toList().isEmpty) {
       debugPrint(
-          "Human player ${currentPlayer.color} rolled $_stickyDiceValue and has no pawns on board. Auto-passing turn.");
-      nextTurn(); // nextTurn already calls notifyListeners and clears _stickyDiceValue
+          "Auto-pass: Human player ${currentPlayer.color} rolled $_stickyDiceValue and has no pawns on board or in home stretch. Auto-passing turn.");
+      nextTurn(); // nextTurn calls notifyListeners and clears _stickyDiceValue
       return;
     }
 
-    // Check for AI turn after dice roll
-    if (getCurrentPlayer().isAI) {
+    // Existing AI turn check.
+    // This will be reached if:
+    // 1. It was AI's turn initially.
+    // 2. It was Human's turn, they didn't trigger auto-move (e.g., not all pawns home, or not a 6).
+    // 3. It was Human's turn, they didn't trigger auto-pass (e.g., rolled 6, or has pawns out).
+    // If nextTurn() was called by auto-pass, and the new player is AI, _handleAITurn is called within nextTurn().
+    // So, this check here primarily handles the case where it was AI's turn from the beginning of rollDice(),
+    // or if a human player's turn continues (e.g. rolled 6, has pawns out, didn't auto-move).
+    // If it's a human player's turn and they completed their action (auto-move or auto-pass), a 'return' was hit.
+    if (getCurrentPlayer().isAI) { // Check the current player (could have changed if nextTurn was called)
       _handleAITurn();
     }
   }
@@ -90,51 +118,69 @@ class GameState extends ChangeNotifier {
 
   // Attempts to move the currently selected pawn using the current dice value.
   void attemptMoveSelectedPawn() {
+    debugPrint("AttemptMove: Initiated for _selectedPawn: ${_selectedPawn?.id}-${_selectedPawn?.color} (State: ${_selectedPawn?.state.name}, Pos: ${_selectedPawn?.position})");
+
     if (_selectedPawn == null) {
-      debugPrint("No pawn selected to move.");
-      // Optionally, provide user feedback via a message
+      debugPrint("AttemptMove: No pawn selected to move. Aborting.");
       return;
     }
-    if (_selectedPawn!.color != getCurrentPlayer().color) {
-      debugPrint("Selected pawn does not belong to the current player.");
-      // This case should ideally be prevented by selectPawn logic
+
+    Player currentPlayer = getCurrentPlayer();
+    Pawn? originalSelectedPawn = _selectedPawn; // Keep a reference to the initially selected pawn
+
+    // Retrieve the authoritative pawn instance from the current player's list
+    Pawn? authoritativePawn;
+    try {
+      authoritativePawn = currentPlayer.pawns.firstWhere(
+        (p) => p.id == originalSelectedPawn!.id && p.color == originalSelectedPawn.color
+      );
+      debugPrint("AttemptMove: Found authoritative pawn: ${authoritativePawn.id}-${authoritativePawn.color} (State: ${authoritativePawn.state.name}, Pos: ${authoritativePawn.position})");
+    } catch (e) {
+      debugPrint("AttemptMove: CRITICAL ERROR - Could not find authoritative pawn instance for initially selected pawn ${originalSelectedPawn?.id}-${originalSelectedPawn?.color}. Error: $e. Aborting move.");
+      // _selectedPawn = null; // Consider clearing _selectedPawn as it's problematic
+      // notifyListeners(); // If _selectedPawn is cleared
+      return;
+    }
+
+    // This check should ideally always pass if current player is set correctly and pawn selection logic is sound.
+    // And if the authoritativePawn was found from currentPlayer.pawns.
+    if (authoritativePawn.color != currentPlayer.color) {
+      debugPrint("AttemptMove: Authoritative pawn's color ${authoritativePawn.color} does not match current player's color ${currentPlayer.color}. This indicates a severe state inconsistency. Aborting.");
       return;
     }
 
     // Use the _stickyDiceValue for the move attempt
     int? moveDiceValue = _stickyDiceValue;
+    debugPrint("AttemptMove: Using dice value: $moveDiceValue (from _stickyDiceValue)");
 
     if (moveDiceValue == null) {
-      debugPrint("Error: attemptMoveSelectedPawn called but _stickyDiceValue is null. Roll dice first.");
-      // Optionally provide user feedback via a message
+      debugPrint("AttemptMove: Error - _stickyDiceValue is null. Player should roll dice first. Aborting.");
       return;
     }
 
-    // The check for currentDiceValue == 0 is no longer needed here if _stickyDiceValue guarantees a valid roll.
-    // However, if _stickyDiceValue could be 0 from a "bad roll" (if dice could roll 0), it might be relevant.
-    // Assuming dice rolls 1-6.
-
-    // Call the game logic's movePawn
-    bool moveSuccessful = _game.movePawn(_selectedPawn!, moveDiceValue);
+    debugPrint("AttemptMove: Calling _game.movePawn with authoritative pawn ${authoritativePawn.id}-${authoritativePawn.color} and steps $moveDiceValue.");
+    bool moveSuccessful = _game.movePawn(authoritativePawn, moveDiceValue);
+    debugPrint("AttemptMove: _game.movePawn result for ${authoritativePawn.id}-${authoritativePawn.color}: $moveSuccessful. New state: ${authoritativePawn.state.name}, New pos: ${authoritativePawn.position}");
 
     if (moveSuccessful) {
       _stickyDiceValue = null; // Consume the dice value after a successful move
       _selectedPawn = null; // Clear selection after a successful move attempt.
+      debugPrint("AttemptMove: Move successful. _stickyDiceValue cleared. _selectedPawn cleared.");
 
       if (moveDiceValue == 6) {
-        debugPrint("Rolled a 6, player gets another turn. Roll dice again.");
+        debugPrint("AttemptMove: Rolled a 6, player ${currentPlayer.color} gets another turn. Roll dice again.");
         // Player gets another turn, they need to roll dice again.
         // _stickyDiceValue is now null, so they can't move again with the same 6.
         // No call to nextTurn() here.
       } else {
-        // If not a 6, switch to the next player.
+        debugPrint("AttemptMove: Rolled $moveDiceValue (not 6). Passing turn from ${currentPlayer.color}.");
         nextTurn(); // This will also clear _stickyDiceValue again, which is fine.
       }
     } else {
       // If the move was not successful, _stickyDiceValue remains unchanged.
       // This allows the player to select another pawn and try to move it with the same dice value.
-      debugPrint("Move for ${_selectedPawn!.id} of ${_selectedPawn!.color} was not successful with dice $moveDiceValue.");
-      // Do not clear _selectedPawn here, player might want to re-evaluate or it's cleared if they select another.
+      // _selectedPawn also remains unchanged, allowing UI to reflect the still-selected pawn.
+      debugPrint("AttemptMove: Move for ${authoritativePawn.id}-${authoritativePawn.color} was NOT successful with dice $moveDiceValue. _stickyDiceValue ($moveDiceValue) is retained. _selectedPawn (${_selectedPawn?.id}) is retained.");
     }
     notifyListeners();
   }
